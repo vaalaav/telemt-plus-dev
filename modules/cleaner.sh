@@ -214,6 +214,33 @@ cleaner_run() {
         msg_info "Nginx конфиги проекта не найдены"
     fi
 
+    # Остановить / удалить nginx полностью?
+    if command -v nginx &>/dev/null && systemctl is-active --quiet nginx 2>/dev/null; then
+        echo ""
+        echo -e "    ${C_YELLOW}[1]${C_RESET} Остановить и отключить Nginx (можно включить позже)"
+        echo -e "    ${C_RED}[2]${C_RESET} Полностью удалить Nginx (apt remove)"
+        echo -e "    ${C_DIM}[3]${C_RESET} Оставить Nginx работающим"
+        echo -ne "  ${C_BOLD}Nginx${C_RESET} [1/2/3]: "
+        local ng_choice=""
+        read -r ng_choice </dev/tty || true
+        case "$ng_choice" in
+            1)
+                systemctl stop nginx >> "$LOG_FILE" 2>&1 || true
+                systemctl disable nginx >> "$LOG_FILE" 2>&1 || true
+                msg_ok "Nginx остановлен и отключён"
+                ;;
+            2)
+                systemctl stop nginx >> "$LOG_FILE" 2>&1 || true
+                apt-get remove -y nginx nginx-common >> "$LOG_FILE" 2>&1 || true
+                apt-get autoremove -y >> "$LOG_FILE" 2>&1 || true
+                msg_ok "Nginx полностью удалён"
+                ;;
+            *)
+                msg_info "Nginx оставлен без изменений"
+                ;;
+        esac
+    fi
+
     # Очистка /var/www/html (сайт-маска + .well-known)
     if confirm_yn "Очистить /var/www/html (сайт-маска)?" "y"; then
         rm -rf /var/www/html/.well-known 2>/dev/null || true
