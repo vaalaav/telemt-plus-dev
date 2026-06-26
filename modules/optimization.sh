@@ -419,8 +419,22 @@ opt_firewall() {
         rollback_push "firewall-cmd --permanent --remove-port=${port}/tcp 2>/dev/null; firewall-cmd --reload 2>/dev/null"
         msg_ok "firewalld: порт ${port}/tcp открыт"
     else
-        msg_info "Активный firewall-менеджер (ufw/firewalld) не обнаружен"
-        msg_info "Убедитесь, что порт ${port}/tcp открыт в настройках VPS"
+        # Raw iptables — если INPUT policy DROP, нужно явно разрешить
+        local policy
+        policy=$(iptables -L INPUT -n 2>/dev/null | head -1 | awk -F'[()]' '{print $2}') || true
+        if [[ "$policy" == "DROP" ]] || ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+            iptables -I INPUT 1 -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
+            if command -v netfilter-persistent &>/dev/null; then
+                netfilter-persistent save >> "$LOG_FILE" 2>&1
+            elif command -v iptables-save &>/dev/null; then
+                mkdir -p /etc/iptables
+                iptables-save > /etc/iptables/rules.v4 2>/dev/null
+            fi
+            rollback_push "iptables -D INPUT -p tcp --dport ${port} -j ACCEPT 2>/dev/null || true"
+            msg_ok "iptables: порт ${port}/tcp открыт"
+        else
+            msg_info "Порт ${port}/tcp уже открыт или firewall не активен"
+        fi
     fi
 }
 

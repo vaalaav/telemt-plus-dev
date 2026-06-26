@@ -258,8 +258,17 @@ ACMETMPEOF
     systemctl restart nginx >> "$LOG_FILE" 2>&1
 
     # Открыть порт 80 для ACME
+    # Открыть порт 80 для ACME (ufw → firewalld → raw iptables)
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         ufw allow 80/tcp >> "$LOG_FILE" 2>&1 || true
+    elif command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
+        firewall-cmd --add-port=80/tcp >> "$LOG_FILE" 2>&1 || true
+    else
+        # Raw iptables — проверить policy и добавить правило
+        if ! iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null; then
+            iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
+            msg_ok "iptables: порт 80 открыт"
+        fi
     fi
 
     # Получение сертификата через webroot
@@ -400,11 +409,34 @@ print('OK')
     fi
 
     # Открыть 80 и 443 в firewall
+    # Открыть 80 и 443 в firewall (ufw → firewalld → raw iptables)
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         ufw allow 80/tcp  >> "$LOG_FILE" 2>&1 || true
         ufw allow 443/tcp >> "$LOG_FILE" 2>&1 || true
         rollback_push "ufw delete allow 80/tcp 2>/dev/null; ufw delete allow 443/tcp 2>/dev/null"
         msg_ok "UFW: порты 80, 443 открыты"
+    elif command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
+        firewall-cmd --permanent --add-port=80/tcp  >> "$LOG_FILE" 2>&1 || true
+        firewall-cmd --permanent --add-port=443/tcp >> "$LOG_FILE" 2>&1 || true
+        firewall-cmd --reload >> "$LOG_FILE" 2>&1 || true
+        rollback_push "firewall-cmd --permanent --remove-port=80/tcp 2>/dev/null; firewall-cmd --permanent --remove-port=443/tcp 2>/dev/null; firewall-cmd --reload 2>/dev/null"
+        msg_ok "firewalld: порты 80, 443 открыты"
+    else
+        # Raw iptables
+        for p in 80 443; do
+            if ! iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null; then
+                iptables -I INPUT 1 -p tcp --dport "$p" -j ACCEPT
+            fi
+        done
+        # Сохранить
+        if command -v netfilter-persistent &>/dev/null; then
+            netfilter-persistent save >> "$LOG_FILE" 2>&1
+        elif command -v iptables-save &>/dev/null; then
+            mkdir -p /etc/iptables
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null
+        fi
+        rollback_push "iptables -D INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null; iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null"
+        msg_ok "iptables: порты 80, 443 открыты"
     fi
 }
 

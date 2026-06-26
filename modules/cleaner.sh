@@ -104,17 +104,36 @@ cleaner_run() {
         fi
     done
 
-    # ── 6. Откат iptables SYN FIX ───────────────────────────────
-    msg_step "Откат iptables SYN FIX"
+    # ── 6. Откат iptables / nftables ────────────────────────────
+    msg_step "Откат iptables и nftables"
 
+    # Удалить кастомную цепочку MTPR_SYNFIX
     local chain="MTPR_SYNFIX"
     if iptables -L "$chain" -n &>/dev/null; then
         iptables -D INPUT -j "$chain" 2>/dev/null || true
         iptables -F "$chain" 2>/dev/null || true
         iptables -X "$chain" 2>/dev/null || true
-        msg_ok "Цепочка ${chain} удалена"
-    else
-        msg_info "Цепочка ${chain} не найдена — пропуск"
+        msg_ok "iptables: цепочка ${chain} удалена"
+    fi
+
+    # Удалить все правила с упоминанием telemt-портов, добавленные нами
+    # (SSH-protect правило на порт прокси, etc.)
+    local proxy_port=""
+    [[ -f /opt/mtpr-simple/port ]] && proxy_port=$(cat /opt/mtpr-simple/port 2>/dev/null)
+    if [[ -n "$proxy_port" ]]; then
+        while iptables -D INPUT -p tcp --dport "$proxy_port" -j ACCEPT 2>/dev/null; do :; done
+        msg_ok "iptables: правила для порта ${proxy_port} удалены"
+    fi
+
+    # Сбросить INPUT policy на ACCEPT (MEKO/предыдущие установки могли поставить DROP)
+    local current_policy
+    current_policy=$(iptables -L INPUT -n 2>/dev/null | head -1 | awk -F'[()]' '{print $2}')
+    if [[ "$current_policy" == "DROP" ]]; then
+        msg_warn "iptables INPUT policy = DROP — сбрасываем на ACCEPT"
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+        msg_ok "iptables: все policy сброшены на ACCEPT"
     fi
 
     # Сохранить iptables
@@ -125,11 +144,23 @@ cleaner_run() {
         iptables-save > /etc/iptables/rules.v4 2>/dev/null
     fi
 
-    # Откат nftables таблиц (на случай если использовались)
-    for tbl in telemt_limit telemt_ios2_fix; do
-        nft delete table inet "$tbl" 2>/dev/null || true
-        nft delete table ip "$tbl" 2>/dev/null || true
-    done
+    # Откат ВСЕХ nftables таблиц с упоминанием telemt
+    if command -v nft &>/dev/null; then
+        local nft_tables
+        nft_tables=$(nft list tables 2>/dev/null | grep -i 'telemt\|mtpr\|syn_limit' | awk '{print $2, $3}') || true
+        if [[ -n "$nft_tables" ]]; then
+            while IFS=' ' read -r family table; do
+                nft delete table "$family" "$table" 2>/dev/null || true
+                msg_ok "nftables: удалена таблица ${family} ${table}"
+            done <<< "$nft_tables"
+        fi
+        # Также удалить известные таблицы напрямую
+        for tbl in telemt_limit telemt_ios2_fix telemt_syn_limit; do
+            nft delete table inet "$tbl" 2>/dev/null || true
+            nft delete table ip "$tbl" 2>/dev/null || true
+        done
+        msg_ok "nftables: telemt-таблицы очищены"
+    fi
 
     # ── 7. Откат sysctl ──────────────────────────────────────────
     msg_step "Откат sysctl"
