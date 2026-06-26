@@ -154,7 +154,7 @@ prompt_input() {
         echo -ne "  ${C_BOLD}${prompt}${C_RESET}"
         [[ -n "$default" ]] && echo -ne " ${C_DIM}[${default}]${C_RESET}"
         echo -ne ": "
-        read -r value
+        read -r value </dev/tty || true
         value="${value:-$default}"
         if [[ -z "$value" ]]; then
             msg_warn "Значение не может быть пустым"
@@ -174,7 +174,7 @@ prompt_secret() {
     local prompt="$1" var_name="$2"
     local value
     echo -ne "  ${C_BOLD}${prompt}${C_RESET}: "
-    read -rs value
+    read -rs value </dev/tty || true
     echo
     if [[ -z "$value" ]]; then
         msg_warn "Токен не может быть пустым"
@@ -193,7 +193,7 @@ confirm_yn() {
 
     echo -ne "  ${C_BOLD}${prompt}${C_RESET} [${hint}]: "
     local answer
-    read -r answer
+    read -r answer </dev/tty || true
     answer="${answer:-$default}"
     [[ "$answer" =~ ^[YyДд] ]]
 }
@@ -211,7 +211,7 @@ confirm_step() {
     echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
     local choice
-    read -r choice
+    read -r choice </dev/tty || true
     case "$choice" in
         1|"") return 0 ;;
         2)    return 1 ;;
@@ -231,7 +231,7 @@ handle_cancel() {
     echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
     local choice
-    read -r choice
+    read -r choice </dev/tty || true
     case "$choice" in
         1) return 0 ;;
         2) return 1 ;;

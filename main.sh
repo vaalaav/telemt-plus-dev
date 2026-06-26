@@ -47,13 +47,13 @@ print_status_panel() {
     local os_info uptime_info cpu ram disk
     local st_telemt st_panel st_nginx
 
-    os_info="$(get_os_info)"
-    uptime_info="$(get_uptime)"
-    cpu="$(get_cpu_usage)"
-    ram="$(get_ram_usage)"
-    disk="$(get_disk_usage)"
-    st_telemt="$(get_service_status MTProxy 2>/dev/null || get_service_status telemt 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
-    st_panel="$(get_service_status telemt_panel 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
+    os_info="$(get_os_info 2>/dev/null || echo 'n/a')"
+    uptime_info="$(get_uptime 2>/dev/null || echo 'n/a')"
+    cpu="$(get_cpu_usage 2>/dev/null || echo 'n/a')"
+    ram="$(get_ram_usage 2>/dev/null || echo 'n/a')"
+    disk="$(get_disk_usage 2>/dev/null || echo 'n/a')"
+    st_telemt="$(get_service_status telemt 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
+    st_panel="$(get_service_status telemt-panel 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
     st_nginx="$(get_service_status nginx 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
 
     echo -e "  ${C_DIM}┌──────────────────── Состояние сервера ────────────────────┐${C_RESET}"
@@ -270,6 +270,10 @@ main() {
     # Проверка базовых утилит
     require_commands curl git jq
 
+    # Отключаем set -e для интерактивного цикла —
+    # иначе любой read/status-check обрушит скрипт
+    set +e
+
     while true; do
         clear
         print_logo
@@ -277,8 +281,8 @@ main() {
         print_menu
 
         echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-4]: "
-        local choice
-        read -r choice
+        local choice=""
+        read -r choice </dev/tty || true
 
         case "$choice" in
             1) do_standard_install ;;
@@ -297,7 +301,7 @@ main() {
 
         echo ""
         echo -ne "  ${C_DIM}Нажмите Enter для возврата в меню...${C_RESET}"
-        read -r
+        read -r </dev/tty || true
     done
 }
 
