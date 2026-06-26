@@ -22,10 +22,16 @@ for cmd in git curl jq; do
     fi
 done
 
-# Клонирование / обновление
+# Клонирование / обновление (при force-push — переклонировать)
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
     echo "[*] Обновление..."
-    cd "$INSTALL_DIR" && git pull --ff-only 2>/dev/null || true
+    cd "$INSTALL_DIR"
+    if ! git pull --ff-only 2>/dev/null; then
+        echo "[*] Force-push обнаружен — переклонирование..."
+        cd /
+        rm -rf "$INSTALL_DIR"
+        git clone --depth 1 "$REPO" "$INSTALL_DIR"
+    fi
 else
     echo "[*] Клонирование репозитория..."
     rm -rf "$INSTALL_DIR"
