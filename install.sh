@@ -33,4 +33,4 @@ fi
 chmod +x "${INSTALL_DIR}/main.sh" "${INSTALL_DIR}/modules/"*.sh
 
 echo "[*] Запуск установщика..."
-exec bash "${INSTALL_DIR}/main.sh"
+exec bash "${INSTALL_DIR}/main.sh" </dev/tty
