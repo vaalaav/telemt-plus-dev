@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
 #  telemt VPS Installer — bootstrap
-#  curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/install.sh | sudo bash
+#  Использование:
+#    curl -fsSL -H "Authorization: token TOKEN" URL -o /tmp/tinstall.sh && sudo bash /tmp/tinstall.sh
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -9,14 +10,15 @@ REPO="https://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@github.com/vaalaav/telemt
 INSTALL_DIR="/opt/telemt-installer"
 
 if [[ $EUID -ne 0 ]]; then
-    echo "Запустите от root: curl -fsSL ... | sudo bash"
+    echo "Запустите от root: sudo bash $0"
     exit 1
 fi
 
 # Зависимости
 for cmd in git curl jq; do
     if ! command -v "$cmd" &>/dev/null; then
-        apt-get update -qq && apt-get install -y -qq "$cmd"
+        echo "[*] Установка $cmd..."
+        apt-get update -qq 2>/dev/null && apt-get install -y -qq "$cmd" 2>/dev/null
     fi
 done
 
@@ -33,4 +35,5 @@ fi
 chmod +x "${INSTALL_DIR}/main.sh" "${INSTALL_DIR}/modules/"*.sh
 
 echo "[*] Запуск установщика..."
-exec bash "${INSTALL_DIR}/main.sh" </dev/tty
+cd "$INSTALL_DIR"
+bash main.sh

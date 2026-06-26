@@ -3,7 +3,9 @@
 #  main.sh — Главный управляющий скрипт telemt VPS Installer
 #  Запуск: sudo bash main.sh
 # ═══════════════════════════════════════════════════════════════════
-set -euo pipefail
+# НЕ используем set -euo pipefail в интерактивном скрипте —
+# read, confirm, status-check возвращают ненулевые коды штатно
+set -o pipefail
 
 # ── Определение корня проекта ─────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
