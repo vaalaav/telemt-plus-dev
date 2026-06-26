@@ -164,44 +164,68 @@ cleaner_run() {
     for f in "${nginx_files[@]}"; do
         if [[ -e "$f" ]]; then
             rm -f "$f"
+            msg_ok "Удалён: $(basename "$f")"
             nginx_changed=true
         fi
     done
 
     if [[ "$nginx_changed" == "true" ]]; then
-        # Восстановить default
+        # Восстановить default конфиг nginx
         if [[ -f /etc/nginx/sites-available/default ]]; then
             ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+            msg_ok "Восстановлен nginx default"
         fi
         if command -v nginx &>/dev/null; then
-            nginx -t >> "$LOG_FILE" 2>&1 && systemctl reload nginx >> "$LOG_FILE" 2>&1
-        fi
-        msg_ok "Nginx конфиги очищены"
-    fi
-
-    # Очистка /var/www/html
-    if confirm_yn "Очистить /var/www/html (сайт-маска)?" "y"; then
-        rm -rf /var/www/html/*
-        echo '<h1>Welcome to nginx!</h1>' > /var/www/html/index.html 2>/dev/null || true
-        msg_ok "/var/www/html очищен"
-    fi
-
-    # ── 9. Let's Encrypt ─────────────────────────────────────────
-    msg_step "Let's Encrypt"
-
-    local certs
-    certs=$(certbot certificates 2>/dev/null | grep 'Certificate Name:' | awk '{print $3}')
-    if [[ -n "$certs" ]]; then
-        msg_info "Найденные сертификаты: ${certs}"
-        if confirm_yn "Удалить сертификаты Let's Encrypt?" "n"; then
-            for cert_name in $certs; do
-                certbot delete --cert-name "$cert_name" --non-interactive >> "$LOG_FILE" 2>&1 && \
-                    msg_ok "Удалён сертификат: ${cert_name}" || \
-                    msg_warn "Не удалось удалить: ${cert_name}"
-            done
+            nginx -t >> "$LOG_FILE" 2>&1 && systemctl reload nginx >> "$LOG_FILE" 2>&1 || \
+                msg_warn "nginx -t failed — проверьте конфигурацию вручную"
         fi
     else
-        msg_info "Сертификаты не найдены"
+        msg_info "Nginx конфиги проекта не найдены"
+    fi
+
+    # Очистка /var/www/html (сайт-маска + .well-known)
+    if confirm_yn "Очистить /var/www/html (сайт-маска)?" "y"; then
+        rm -rf /var/www/html/.well-known 2>/dev/null || true
+        rm -rf /var/www/html/* 2>/dev/null || true
+        # Восстановить дефолтную страницу nginx
+        mkdir -p /var/www/html
+        cat > /var/www/html/index.html << 'DEFHTML'
+<!doctype html><html><head><title>Welcome to nginx!</title></head>
+<body><h1>Welcome to nginx!</h1><p>If you see this page, nginx is installed.</p></body></html>
+DEFHTML
+        chown -R www-data:www-data /var/www/html 2>/dev/null || true
+        msg_ok "/var/www/html очищен и восстановлен"
+    fi
+
+    # ── 9. Let's Encrypt сертификаты ─────────────────────────────
+    msg_step "Let's Encrypt сертификаты"
+
+    if command -v certbot &>/dev/null; then
+        local certs
+        certs=$(certbot certificates 2>/dev/null | grep 'Certificate Name:' | awk '{print $3}')
+        if [[ -n "$certs" ]]; then
+            msg_info "Найденные сертификаты:"
+            for cert_name in $certs; do
+                echo -e "    ${C_YELLOW}•${C_RESET} ${cert_name}"
+            done
+            if confirm_yn "Удалить сертификаты Let's Encrypt?" "n"; then
+                for cert_name in $certs; do
+                    certbot delete --cert-name "$cert_name" --non-interactive >> "$LOG_FILE" 2>&1 && \
+                        msg_ok "Удалён сертификат: ${cert_name}" || \
+                        msg_warn "Не удалось удалить: ${cert_name}"
+                done
+            fi
+        else
+            msg_info "Сертификаты не найдены"
+        fi
+
+        # Удалить cron записи certbot renew если были добавлены нами
+        if crontab -l 2>/dev/null | grep -q 'certbot renew'; then
+            crontab -l 2>/dev/null | grep -v 'certbot renew' | crontab - 2>/dev/null || true
+            msg_ok "Cron для certbot renew удалён"
+        fi
+    else
+        msg_info "certbot не установлен — пропуск"
     fi
 
     # ── 10. Логи ─────────────────────────────────────────────────
