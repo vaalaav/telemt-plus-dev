@@ -46,7 +46,7 @@ LOGO
 
 # ── Панель состояния системы ──────────────────────────────────────
 print_status_panel() {
-    local os_info uptime_info cpu ram disk
+    local os_info uptime_info cpu ram disk server_ip domain_info
     local st_telemt st_panel st_nginx
 
     os_info="$(get_os_info 2>/dev/null || echo 'n/a')"
@@ -54,21 +54,53 @@ print_status_panel() {
     cpu="$(get_cpu_usage 2>/dev/null || echo 'n/a')"
     ram="$(get_ram_usage 2>/dev/null || echo 'n/a')"
     disk="$(get_disk_usage 2>/dev/null || echo 'n/a')"
+    server_ip="$(curl -4s --max-time 3 ifconfig.me 2>/dev/null || echo 'n/a')"
+
+    # Домен из конфига telemt
+    domain_info="не привязан"
+    local _cfg=""
+    for _f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
+        [[ -f "$_f" ]] && _cfg="$_f" && break
+    done
+    if [[ -n "$_cfg" ]]; then
+        local _ph; _ph=$(grep -E '^public_host[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        [[ -n "$_ph" ]] && domain_info="$_ph"
+    fi
+
     st_telemt="$(get_service_status telemt 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
     st_panel="$(get_service_status telemt-panel 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
     st_nginx="$(get_service_status nginx 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
+
+    # Выравнивание: значения начинаются на визуальной колонке 15
+    # Кириллица: 1 визуальный символ = 2 байта в UTF-8
+    # ОС(2):     визуальная ширина 3  → нужно 12 пробелов
+    # Аптайм(6): визуальная ширина 7  → нужно 8 пробелов
+    # IP(2):     визуальная ширина 3  → нужно 12 пробелов
+    # Домен(5):  визуальная ширина 6  → нужно 9 пробелов
+    # CPU(3):    визуальная ширина 4  → нужно 11 пробелов
+    # RAM(3):    визуальная ширина 4  → нужно 11 пробелов
+    # Disk(4):   визуальная ширина 5  → нужно 10 пробелов
+    local L_OS="ОС:            "  # 3 vis + 12 sp = 15
+    local L_UP="Аптайм:        "  # 7 vis + 8 sp  = 15
+    local L_IP="IP:            "  # 3 vis + 12 sp = 15
+    local L_DM="Домен:         "  # 6 vis + 9 sp  = 15
+    local L_CP="CPU:           "  # 4 vis + 11 sp = 15
+    local L_RM="RAM:           "  # 4 vis + 11 sp = 15
+    local L_DK="Disk:          "  # 5 vis + 10 sp = 15
 
     echo -e "  ${C_DIM}┌───────────────────────────────────────────────────────────┐${C_RESET}"
     echo -e "  ${C_DIM}│${C_RESET}  ${C_BOLD}Состояние сервера${C_RESET}"
     echo -e "  ${C_DIM}├───────────────────────────────────────────────────────────┤${C_RESET}"
     echo -e "  ${C_DIM}│${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ОС:            ${C_WHITE}${os_info}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   Аптайм:        ${C_WHITE}${uptime_info}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   CPU:           ${C_WHITE}${cpu}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   RAM:           ${C_WHITE}${ram}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   Disk:          ${C_WHITE}${disk}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_OS}${C_WHITE}${os_info}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_UP}${C_WHITE}${uptime_info}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_IP}${C_WHITE}${server_ip}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_DM}${C_WHITE}${domain_info}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_CP}${C_WHITE}${cpu}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_RM}${C_WHITE}${ram}${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${L_DK}${C_WHITE}${disk}${C_RESET}"
     echo -e "  ${C_DIM}│${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${C_DIM}─── Сервисы ───${C_RESET}"
+    echo -e "  ${C_DIM}│${C_RESET}   ${C_DIM}─── Сервисы ─────────────────────${C_RESET}"
     echo -e "  ${C_DIM}│${C_RESET}   telemt:        ${st_telemt}"
     echo -e "  ${C_DIM}│${C_RESET}   telemt-panel:  ${st_panel}"
     echo -e "  ${C_DIM}│${C_RESET}   Nginx:         ${st_nginx}"
