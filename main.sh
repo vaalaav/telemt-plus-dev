@@ -104,6 +104,33 @@ print_status_panel() {
     echo -e "  ${C_DIM}│${C_RESET}   telemt:        ${st_telemt}"
     echo -e "  ${C_DIM}│${C_RESET}   telemt-panel:  ${st_panel}"
     echo -e "  ${C_DIM}│${C_RESET}   Nginx:         ${st_nginx}"
+
+    # Прокси-ссылка (если telemt установлен)
+    local proxy_link=""
+    if [[ -f /opt/telemt/proxy_links.txt ]]; then
+        proxy_link=$(grep -E '^(tg://|https://t\.me/)' /opt/telemt/proxy_links.txt 2>/dev/null | head -1)
+    fi
+    # Если файла нет — попробовать построить из конфига
+    if [[ -z "$proxy_link" && -n "$_cfg" ]]; then
+        local _secret _tls_domain _port _host
+        _secret=$(grep -E '^hello[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        _tls_domain=$(grep -E '^tls_domain[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        _port=$(grep -E '^port[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        _host="${domain_info}"
+        [[ "$_host" == "не привязан" ]] && _host="$server_ip"
+        if [[ -n "$_secret" && -n "$_tls_domain" ]]; then
+            local _domain_hex
+            _domain_hex=$(printf '%s' "$_tls_domain" | od -An -tx1 | tr -d ' \n')
+            proxy_link="https://t.me/proxy?server=${_host}&port=${_port:-443}&secret=ee${_secret}${_domain_hex}"
+        fi
+    fi
+
+    if [[ -n "$proxy_link" ]]; then
+        echo -e "  ${C_DIM}│${C_RESET}"
+        echo -e "  ${C_DIM}│${C_RESET}   ${C_DIM}─── Прокси-ссылка ───────────────${C_RESET}"
+        echo -e "  ${C_DIM}│${C_RESET}   ${C_CYAN}${proxy_link}${C_RESET}"
+    fi
+
     echo -e "  ${C_DIM}│${C_RESET}"
     echo -e "  ${C_DIM}└───────────────────────────────────────────────────────────┘${C_RESET}"
     echo ""

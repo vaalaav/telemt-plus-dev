@@ -388,60 +388,58 @@ SVCEOF
 telemt_print_links() {
     msg_step "Прокси-ссылки"
 
+    local ip host domain_hex full_secret link link_https
+    ip=$(_get_public_ipv4)
+    host="${TELEMT_PUBLIC_HOST:-$ip}"
+    domain_hex=$(printf '%s' "${TELEMT_TLS_DOMAIN:-unknown}" | od -An -tx1 | tr -d ' \n')
+    full_secret="ee${TELEMT_SECRET}${domain_hex}"
+
+    link="tg://proxy?server=${host}&port=${TELEMT_PORT:-443}&secret=${full_secret}"
+    link_https="https://t.me/proxy?server=${host}&port=${TELEMT_PORT:-443}&secret=${full_secret}"
+
     # Попробовать через API (самый надёжный способ)
     local api_url="http://127.0.0.1:9091/v1/users"
     local api_ok=false
 
-    sleep 2  # подождать API
+    sleep 3  # подождать API
 
     local api_response
     api_response=$(curl -s --max-time 5 "$api_url" 2>/dev/null) || true
 
-    if [[ -n "$api_response" ]] && echo "$api_response" | jq -e '.data' &>/dev/null; then
+    if [[ -n "$api_response" ]] && echo "$api_response" | jq -e '.data' &>/dev/null 2>&1; then
         api_ok=true
-        msg_info "Ссылки из API telemt:"
-        echo ""
-        echo "$api_response" | jq -r '.data[] |
-            "  Пользователь: \(.username)",
-            (.links.tls[]? | "  TLS: \(.)"),
-            (.links.secure[]? | "  Secure: \(.)"),
-            ""' 2>/dev/null
+        local api_link
+        api_link=$(echo "$api_response" | jq -r '.data[].links.tls[]?' 2>/dev/null | head -1)
+        if [[ -n "$api_link" ]]; then
+            link_https="$api_link"
+            link="$(echo "$api_link" | sed 's|https://t.me/proxy|tg://proxy|')"
+        fi
+        msg_info "Ссылки получены из API telemt"
+    else
+        msg_warn "API недоступен — ссылка сгенерирована вручную"
     fi
 
-    # Если API недоступен — построить ссылку вручную
-    if [[ "$api_ok" == "false" ]]; then
-        msg_warn "API недоступен, генерируем ссылку вручную"
-        local ip
-        ip=$(_get_public_ipv4)
-        local host="${TELEMT_PUBLIC_HOST:-$ip}"
-        local domain_hex
-        domain_hex=$(printf '%s' "$TELEMT_TLS_DOMAIN" | od -An -tx1 | tr -d ' \n')
-        local full_secret="ee${TELEMT_SECRET}${domain_hex}"
-
-        local link="tg://proxy?server=${host}&port=${TELEMT_PORT}&secret=${full_secret}"
-        local link_https="https://t.me/proxy?server=${host}&port=${TELEMT_PORT}&secret=${full_secret}"
-
-        echo ""
-        draw_info_box 70 \
-            "${C_BOLD}tg://${C_RESET}  ${C_CYAN}${link}${C_RESET}" \
-            "" \
-            "${C_BOLD}https://${C_RESET} ${C_CYAN}${link_https}${C_RESET}"
-        echo ""
-    fi
+    # Вывод ссылок
+    echo ""
+    draw_info_box 70 \
+        "${C_BOLD}Прокси-ссылки:${C_RESET}" \
+        "" \
+        "${C_CYAN}${link_https}${C_RESET}" \
+        "" \
+        "${C_DIM}${link}${C_RESET}"
+    echo ""
 
     # Сохранить в файл
+    mkdir -p "${TELEMT_WORK_DIR}" 2>/dev/null || true
     local links_file="${TELEMT_WORK_DIR}/proxy_links.txt"
     {
         echo "# telemt proxy links — $(date)"
-        echo "# server: ${TELEMT_PUBLIC_HOST:-$(_get_public_ipv4)}:${TELEMT_PORT}"
+        echo "# server: ${host}:${TELEMT_PORT:-443}"
         echo "# secret: ${TELEMT_SECRET}"
         echo "# tls_domain: ${TELEMT_TLS_DOMAIN}"
-        if [[ "$api_ok" == "true" ]]; then
-            curl -s "$api_url" 2>/dev/null | jq -r '.data[] | (.links.tls[]? // empty)' 2>/dev/null
-        else
-            echo "tg://proxy?server=${TELEMT_PUBLIC_HOST:-$(_get_public_ipv4)}&port=${TELEMT_PORT}&secret=ee${TELEMT_SECRET}${domain_hex}"
-        fi
-    } > "$links_file" 2>/dev/null
+        echo "${link_https}"
+        echo "${link}"
+    } > "$links_file" 2>/dev/null || true
     chown "${TELEMT_USER}:${TELEMT_GROUP}" "$links_file" 2>/dev/null || true
     msg_ok "Ссылки сохранены в ${links_file}"
 }
