@@ -114,36 +114,35 @@ draw_hline() {
     printf '%0.s'"$char" $(seq 1 "$w")
 }
 
-# Рисует рамку вокруг текста
+# Рисует заголовок-блок (без рамки, с цветной линией)
 draw_box() {
-    local text="$1" color="${2:-$C_CYAN}" width="${3:-60}"
-    local text_plain; text_plain=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
-    local pad=$(( (width - 2 - ${#text_plain}) / 2 ))
-    (( pad < 1 )) && pad=1
-
-    echo -e "${color}${BOX_TL}$(draw_hline $((width-2)))${BOX_TR}${C_RESET}"
-    printf "${color}${BOX_V}${C_RESET}"
-    printf "%*s" "$pad" ""
-    echo -ne "${C_BOLD}${text}${C_RESET}"
-    printf "%*s" $(( width - 2 - pad - ${#text_plain} )) ""
-    echo -e "${color}${BOX_V}${C_RESET}"
-    echo -e "${color}${BOX_BL}$(draw_hline $((width-2)))${BOX_BR}${C_RESET}"
+    local text="$1" color="${2:-$C_CYAN}"
+    echo ""
+    echo -e "  ${color}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "  ${C_BOLD}  ${text}${C_RESET}"
+    echo -e "  ${color}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo ""
 }
 
-# Тонкая рамка для блока информации
+# Блок информации — чистый вывод без вертикальных линий
+# Использование: draw_info_box 60 "Заголовок" "" "Ключ: значение" ...
+# (ширина первого аргумента игнорируется для совместимости)
 draw_info_box() {
-    local width="${1:-60}"
+    local _width="${1:-60}"  # совместимость, не используется
     shift
     local lines=("$@")
 
-    echo -e "  ${C_DIM}${BOX_TL_S}$(printf '%0.s─' $(seq 1 $((width-2))))${BOX_TR_S}${C_RESET}"
+    echo ""
+    echo -e "  ${C_CYAN}▐${C_RESET}${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     for line in "${lines[@]}"; do
-        local plain; plain=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*m//g')
-        local rpad=$(( width - 2 - ${#plain} ))
-        (( rpad < 0 )) && rpad=0
-        echo -e "  ${C_DIM}${BOX_V_S}${C_RESET} ${line}$(printf '%*s' "$rpad" '')${C_DIM}${BOX_V_S}${C_RESET}"
+        if [[ -z "$line" ]]; then
+            echo -e "  ${C_CYAN}▐${C_RESET}"
+        else
+            echo -e "  ${C_CYAN}▐${C_RESET}  ${line}"
+        fi
     done
-    echo -e "  ${C_DIM}${BOX_BL_S}$(printf '%0.s─' $(seq 1 $((width-2))))${BOX_BR_S}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo ""
 }
 
 # ── Валидация ввода ──────────────────────────────────────────────
