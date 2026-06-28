@@ -157,7 +157,7 @@ prompt_input() {
         read -r value </dev/tty || true
         value="${value:-$default}"
         if [[ -z "$value" ]]; then
-            msg_warn "Value cannot be empty"
+            msg_warn "Значение не может быть пустым"
             continue
         fi
         if [[ "$value" =~ $pattern ]]; then
@@ -177,7 +177,7 @@ prompt_secret() {
     read -rs value </dev/tty || true
     echo
     if [[ -z "$value" ]]; then
-        msg_warn "Token cannot be empty"
+        msg_warn "Токен не может быть пустым"
         return 1
     fi
     eval "$var_name='$value'"
@@ -205,10 +205,10 @@ confirm_step() {
     echo ""
     echo -e "  ${C_BOLD}${C_WHITE}${step_name}${C_RESET}"
     echo -e "  ${C_DIM}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${C_RESET}"
-    echo -e "    ${C_GREEN}[1]${C_RESET} Confirm (Yes)"
+    echo -e "    ${C_GREEN}[1]${C_RESET} Подтвердить (Yes)"
     echo -e "    ${C_YELLOW}[2]${C_RESET} Пропустить"
     echo -e "    ${C_RED}[3]${C_RESET} Отмена"
-    echo -ne "  ${C_BOLD}Choice${C_RESET} [1/2/3]: "
+    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
     local choice
     read -r choice </dev/tty || true
@@ -216,7 +216,7 @@ confirm_step() {
         1|"") return 0 ;;
         2)    return 1 ;;
         3)    return 2 ;;
-        *)    msg_warn "Invalid input, try again"; confirm_step "$step_name" ;;
+        *)    msg_warn "Некорректный ввод, повторите"; confirm_step "$step_name" ;;
     esac
 }
 
@@ -224,11 +224,11 @@ confirm_step() {
 # Возвращает: 0=откат, 1=пропустить шаг, 2=выход в меню
 handle_cancel() {
     echo ""
-    echo -e "  ${C_RED}${C_BOLD}Operation cancelled.${C_RESET} What to do?"
-    echo -e "    ${C_RED}[1]${C_RESET} Full rollback of current session"
-    echo -e "    ${C_YELLOW}[2]${C_RESET} Skip this step, continue"
-    echo -e "    ${C_CYAN}[3]${C_RESET} Return to main menu"
-    echo -ne "  ${C_BOLD}Choice${C_RESET} [1/2/3]: "
+    echo -e "  ${C_RED}${C_BOLD}Операция отменена.${C_RESET} Что делать?"
+    echo -e "    ${C_RED}[1]${C_RESET} Полный откат действий текущей сессии"
+    echo -e "    ${C_YELLOW}[2]${C_RESET} Пропустить этот шаг, продолжить"
+    echo -e "    ${C_CYAN}[3]${C_RESET} Выход в главное меню"
+    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
     local choice
     read -r choice </dev/tty || true
@@ -236,7 +236,7 @@ handle_cancel() {
         1) return 0 ;;
         2) return 1 ;;
         3) return 2 ;;
-        *) msg_warn "Invalid input"; handle_cancel ;;
+        *) msg_warn "Некорректный ввод"; handle_cancel ;;
     esac
 }
 
