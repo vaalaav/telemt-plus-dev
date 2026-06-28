@@ -331,14 +331,17 @@ telemt_create_service() {
     cat > "$TELEMT_SERVICE_FILE" << SVCEOF
 [Unit]
 Description=Telemt MTProxy
-After=network-online.target
+After=network-online.target nginx.service
 Wants=network-online.target
+# В selfmask-режиме nginx ДОЛЖЕН быть запущен до telemt
+# (TLS bootstrap скачивает сертификат с mask_port при старте)
 
 [Service]
 Type=simple
 User=${TELEMT_USER}
 Group=${TELEMT_GROUP}
 WorkingDirectory=${TELEMT_WORK_DIR}
+ExecStartPre=/bin/sleep 2
 ExecStart=${TELEMT_BIN} ${TELEMT_CONFIG}
 Restart=on-failure
 RestartSec=5
