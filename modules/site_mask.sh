@@ -444,6 +444,47 @@ print('OK')
 #  Шаг 6: Обновление конфига telemt для selfmask
 #  port=443, mask=true, mask_port=8444, tls_domain=DOMAIN
 # ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════
+#  Сбор параметров telemt для selfmask-режима
+#  Порт (443) и домен уже заданы из sitemask_collect_params
+#  Здесь собираем: TLS-домен маскировки, секрет, ad_tag
+# ══════════════════════════════════════════════════════════════════
+sitemask_telemt_params() {
+    msg_header "Параметры telemt (selfmask)"
+
+    msg_info "Порт:   ${C_WHITE}443${C_RESET} (зафиксирован для selfmask)"
+    msg_info "Домен:  ${C_WHITE}${MASK_DOMAIN}${C_RESET}"
+    echo ""
+
+    # TLS-домен маскировки (используем наш домен по умолчанию)
+    TELEMT_TLS_DOMAIN="${MASK_DOMAIN}"
+    msg_ok "TLS-домен: ${TELEMT_TLS_DOMAIN}"
+
+    # Секрет
+    msg_info "Генерация секрета..."
+    TELEMT_SECRET=$(_generate_secret) || return 1
+    msg_ok "Секрет: ${C_DIM}${TELEMT_SECRET}${C_RESET}"
+
+    # Ad-tag (опционально)
+    TELEMT_AD_TAG=""
+    if confirm_yn "Добавить ad_tag (монетизация через @MTProxybot)?" "n"; then
+        prompt_input "Ad-tag (32 hex-символа)" TELEMT_AD_TAG '^[0-9a-fA-F]{32}$'
+    fi
+
+    echo ""
+    draw_info_box 60 \
+        "${C_BOLD}Параметры telemt (selfmask):${C_RESET}" \
+        "" \
+        "Порт:       ${C_WHITE}443${C_RESET}" \
+        "TLS-домен:  ${C_WHITE}${TELEMT_TLS_DOMAIN}${C_RESET}" \
+        "Секрет:     ${C_WHITE}${TELEMT_SECRET}${C_RESET}" \
+        "Домен:      ${C_WHITE}${MASK_DOMAIN}${C_RESET}" \
+        "Mask:       ${C_WHITE}true → nginx:${MASK_NGINX_BACKEND_PORT}${C_RESET}" \
+        "Ad-tag:     ${C_WHITE}${TELEMT_AD_TAG:-не задан}${C_RESET}"
+
+    confirm_yn "Всё верно? Продолжить?" "y" || return 1
+}
+
 sitemask_update_telemt_config() {
     msg_step "Настройка telemt для selfmask"
 
