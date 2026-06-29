@@ -390,45 +390,43 @@ SVCEOF
 telemt_print_links() {
     msg_step "Прокси-ссылки"
 
-    local ip host domain_hex full_secret link link_https
+    local ip host domain_hex full_secret link
     ip=$(_get_public_ipv4)
     host="${TELEMT_PUBLIC_HOST:-$ip}"
     domain_hex=$(printf '%s' "${TELEMT_TLS_DOMAIN:-unknown}" | od -An -tx1 | tr -d ' \n')
     full_secret="ee${TELEMT_SECRET}${domain_hex}"
 
-    link="tg://proxy?server=${host}&port=${TELEMT_PORT:-443}&secret=${full_secret}"
-    link_https="https://t.me/proxy?server=${host}&port=${TELEMT_PORT:-443}&secret=${full_secret}"
+    link=""
 
-    # Попробовать через API (самый надёжный способ)
+    # Попробовать через API
     local api_url="http://127.0.0.1:9091/v1/users"
-    local api_ok=false
-
-    sleep 3  # подождать API
+    sleep 3
 
     local api_response
     api_response=$(curl -s --max-time 5 "$api_url" 2>/dev/null) || true
 
     if [[ -n "$api_response" ]] && echo "$api_response" | jq -e '.data' &>/dev/null 2>&1; then
-        api_ok=true
-        local api_link
-        api_link=$(echo "$api_response" | jq -r '.data[].links.tls[]?' 2>/dev/null | head -1)
-        if [[ -n "$api_link" ]]; then
-            link_https="$api_link"
-            link="$(echo "$api_link" | sed 's|https://t.me/proxy|tg://proxy|')"
-        fi
-        msg_info "Ссылки получены из API telemt"
-    else
-        msg_warn "API недоступен — ссылка сгенерирована вручную"
+        link=$(echo "$api_response" | jq -r '.data[].links.tls[]?' 2>/dev/null | head -1)
+        # API может вернуть tg:// или https:// — унифицируем в tg://
+        link=$(echo "$link" | sed 's|https://t.me/proxy|tg://proxy|')
+        msg_info "Ссылка получена из API telemt"
     fi
 
-    # Вывод ссылок
+    # Если API не вернул или ссылка пустая — строим вручную
+    if [[ -z "$link" || "$link" == "null" ]]; then
+        link="tg://proxy?server=${host}&port=${TELEMT_PORT:-443}&secret=${full_secret}"
+        msg_info "Ссылка сгенерирована вручную"
+    fi
+
+    # Подставить реальный IP вместо 0.0.0.0
+    link=$(echo "$link" | sed "s/server=0\.0\.0\.0/server=${host}/")
+
+    # Вывод
     echo ""
     draw_info_box 70 \
-        "${C_BOLD}Прокси-ссылки:${C_RESET}" \
+        "${C_BOLD}Прокси-ссылка:${C_RESET}" \
         "" \
-        "${C_CYAN}${link_https}${C_RESET}" \
-        "" \
-        "${C_DIM}${link}${C_RESET}"
+        "${C_CYAN}${link}${C_RESET}"
     echo ""
 
     # Сохранить в файл
@@ -439,7 +437,6 @@ telemt_print_links() {
         echo "# server: ${host}:${TELEMT_PORT:-443}"
         echo "# secret: ${TELEMT_SECRET}"
         echo "# tls_domain: ${TELEMT_TLS_DOMAIN}"
-        echo "${link_https}"
         echo "${link}"
     } > "$links_file" 2>/dev/null || true
     chown "${TELEMT_USER}:${TELEMT_GROUP}" "$links_file" 2>/dev/null || true
