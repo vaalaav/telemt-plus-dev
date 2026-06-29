@@ -96,7 +96,6 @@ sitemask_collect_params() {
         "" \
         "${C_DIM}telemt :443 → MTProto + mask → nginx :${MASK_NGINX_BACKEND_PORT}${C_RESET}"
 
-    confirm_yn "Начать настройку selfmask?" "y" || return 1
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -229,7 +228,7 @@ sitemask_obtain_cert() {
         local expiry
         expiry=$(openssl x509 -enddate -noout -in "${cert_dir}/cert.pem" 2>/dev/null | cut -d= -f2)
         [[ -n "$expiry" ]] && msg_info "Истекает: ${expiry}"
-        if ! confirm_yn "Перевыпустить сертификат?" "n"; then
+        if true; then
             return 0
         fi
     fi
@@ -498,7 +497,6 @@ sitemask_telemt_params() {
         "Mask:       ${C_WHITE}true → nginx:${MASK_NGINX_BACKEND_PORT}${C_RESET}" \
         "Ad-tag:     ${C_WHITE}${TELEMT_AD_TAG:-не задан}${C_RESET}"
 
-    confirm_yn "Всё верно? Продолжить?" "y" || return 1
 }
 
 sitemask_update_telemt_config() {

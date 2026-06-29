@@ -145,7 +145,6 @@ telemt_collect_params() {
         "Сервер IP:  ${C_WHITE}${ip}${C_RESET}" \
         "Ad-tag:     ${C_WHITE}${TELEMT_AD_TAG:-не задан}${C_RESET}"
 
-    confirm_yn "Всё верно? Начать установку?" "y" || return 1
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -453,20 +452,20 @@ telemt_print_links() {
 telemt_bind_domain() {
     msg_header "Привязка домена"
 
-    msg_info "Если у вас есть домен, укажите его — он будет подставлен в прокси-ссылки"
-    msg_info "вместо IP-адреса. DNS A-запись должна указывать на этот сервер."
-    echo ""
+    echo -ne "  ${C_BOLD}Домен для прокси-ссылок (Enter = пропустить):${C_RESET} "
+    local domain=""
+    read -r domain </dev/tty || true
 
-    if ! confirm_yn "Привязать домен к прокси?" "n"; then
-        msg_info "Пропущено — в ссылках будет использоваться IP"
+    if [[ -z "$domain" ]]; then
+        msg_info "Пропущено — в ссылках будет IP-адрес"
         return 0
     fi
 
-    prompt_input "Доменное имя (A-запись → этот сервер)" TELEMT_PUBLIC_HOST '^[a-zA-Z0-9._-]+\.[a-zA-Z]{2,}$'
+    TELEMT_PUBLIC_HOST="$domain"
 
     # Проверка DNS
     msg_info "Проверка DNS для ${TELEMT_PUBLIC_HOST}..."
-    local resolved_ip server_ip
+    local resolved_ip="" server_ip=""
     server_ip=$(_get_public_ipv4)
 
     if command -v dig &>/dev/null; then
@@ -475,22 +474,14 @@ telemt_bind_domain() {
         resolved_ip=$(nslookup "$TELEMT_PUBLIC_HOST" 2>/dev/null | awk '/^Address:/{a=$2} END{print a}')
     elif command -v host &>/dev/null; then
         resolved_ip=$(host "$TELEMT_PUBLIC_HOST" 2>/dev/null | awk '/has address/{print $4; exit}')
-    else
-        msg_warn "Нет утилит DNS (dig/nslookup/host) — проверка пропущена"
-        resolved_ip=""
     fi
 
     if [[ -n "$resolved_ip" ]]; then
         if [[ "$resolved_ip" == "$server_ip" ]]; then
-            msg_ok "DNS подтверждён: ${TELEMT_PUBLIC_HOST} → ${resolved_ip}"
+            msg_ok "DNS: ${TELEMT_PUBLIC_HOST} → ${resolved_ip}"
         else
-            msg_warn "DNS указывает на ${resolved_ip}, а IP сервера: ${server_ip}"
-            if ! confirm_yn "Продолжить несмотря на несоответствие?" "n"; then
-                return 0
-            fi
+            msg_warn "DNS: ${resolved_ip}, ожидался ${server_ip} — проверьте A-запись"
         fi
-    else
-        msg_warn "Не удалось проверить DNS — убедитесь, что A-запись настроена"
     fi
 
     # Обновить конфиг: вписать public_host

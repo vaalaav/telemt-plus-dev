@@ -453,13 +453,10 @@ apply_mtproto_fixes_selfmask() {
     # Базовая оптимизация (MEKO sysctl + telemt tuning)
     opt_basic_optimization || true
 
-    # SYN FIX — MEKO оригинал на порт 443
+    # SYN FIX — MEKO оригинал на порт 443 (выполняется молча)
     local save_port="${TELEMT_PORT:-}"
     TELEMT_PORT="443"
-    confirm_step "SYN FIX (MEKO, порт 443)" && opt_syn_fix || {
-        local s=$?
-        (( s == 2 )) && { handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20; }
-    }
+    opt_syn_fix || msg_warn "SYN FIX — ошибка (пропущен)"
     TELEMT_PORT="$save_port"
 
     # КРИТИЧНО: убрать все standalone ACCEPT 443, которые обходят SYN FIX
@@ -504,29 +501,11 @@ apply_mtproto_fixes_selfmask() {
 apply_mtproto_fixes() {
     msg_header "Оптимизация и фиксы DPI"
 
-    # 1. SYN FIX (MEKO — приоритет)
-    confirm_step "SYN FIX (iptables, двухуровневая фильтрация MEKO)" && opt_syn_fix || {
-        local s=$?
-        (( s == 2 )) && { handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20; }
-    }
-
-    # 2. Отключение MSS (MEKO)
-    confirm_step "Отключение MSS в конфиге Telemt (MEKO)" && opt_disable_mss || {
-        local s=$?
-        (( s == 2 )) && { handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20; }
-    }
-
-    # 3. Базовая оптимизация (MEKO sysctl + telemt tuning + reanimation дополнения)
-    confirm_step "Базовая оптимизация (BBR, sysctl, telemt tuning)" && opt_basic_optimization || {
-        local s=$?
-        (( s == 2 )) && { handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20; }
-    }
-
-    # 4. Firewall
-    confirm_step "Настройка firewall" && opt_firewall || {
-        local s=$?
-        (( s == 2 )) && { handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20; }
-    }
+    # Все шаги выполняются молча — подтверждение было на уровне сценария
+    opt_syn_fix            || msg_warn "SYN FIX — ошибка (пропущен)"
+    opt_disable_mss        || true
+    opt_basic_optimization || true
+    opt_firewall           || true
 
     echo ""
     msg_ok "Все фиксы DPI применены"
