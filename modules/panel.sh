@@ -259,8 +259,40 @@ SVCEOF
     systemctl enable "$PANEL_SERVICE" >> "$LOG_FILE" 2>&1
     rollback_push "systemctl stop ${PANEL_SERVICE} 2>/dev/null; systemctl disable ${PANEL_SERVICE} 2>/dev/null; rm -f '${PANEL_SERVICE_FILE}'; systemctl daemon-reload"
 
+    # ── Открыть порт ДО запуска сервиса ───────────────────────────
+    msg_step "Настройка сети"
+
+    # UFW
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+        ufw allow "${PANEL_PORT}/tcp" >> "$LOG_FILE" 2>&1 || true
+        msg_ok "UFW: порт ${PANEL_PORT}/tcp открыт"
+    fi
+
+    # firewalld
+    if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
+        firewall-cmd --permanent --add-port="${PANEL_PORT}/tcp" >> "$LOG_FILE" 2>&1 || true
+        firewall-cmd --reload >> "$LOG_FILE" 2>&1 || true
+        msg_ok "firewalld: порт ${PANEL_PORT}/tcp открыт"
+    fi
+
+    # iptables (всегда — даже если ufw/firewalld не активны)
+    if ! iptables -C INPUT -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null; then
+        iptables -I INPUT 1 -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null || true
+    fi
+    # Сохранить
+    if command -v netfilter-persistent &>/dev/null; then
+        netfilter-persistent save >> "$LOG_FILE" 2>&1
+    elif command -v iptables-save &>/dev/null; then
+        mkdir -p /etc/iptables
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null
+    fi
+    msg_ok "iptables: порт ${PANEL_PORT}/tcp открыт"
+
+    # ── Запуск сервиса ────────────────────────────────────────────
+    msg_step "Запуск панели"
+
     if systemctl start "$PANEL_SERVICE" >> "$LOG_FILE" 2>&1; then
-        sleep 2
+        sleep 3
         if systemctl is-active --quiet "$PANEL_SERVICE"; then
             msg_ok "Панель запущена"
         else
@@ -270,6 +302,17 @@ SVCEOF
         msg_err "Не удалось запустить панель"
         msg_info "Логи: journalctl -u ${PANEL_SERVICE} -n 30 --no-pager"
         return 1
+    fi
+
+    # ── Самотест доступности ──────────────────────────────────────
+    local self_test
+    self_test=$(curl -so /dev/null -w "%{http_code}" "http://127.0.0.1:${PANEL_PORT}/" --max-time 5 2>/dev/null) || true
+    if [[ "$self_test" =~ ^(200|301|302|401|403) ]]; then
+        msg_ok "Самотест: панель отвечает (HTTP ${self_test})"
+    else
+        msg_warn "Самотест: панель не отвечает (HTTP ${self_test:-timeout})"
+        msg_info "Проверьте: journalctl -u ${PANEL_SERVICE} -n 20 --no-pager"
+        msg_info "Проверьте: ss -tlnp | grep ${PANEL_PORT}"
     fi
 
     # ── Итог ──────────────────────────────────────────────────────
@@ -292,17 +335,6 @@ SVCEOF
     fi
 
     local access_url="http://${panel_host}:${PANEL_PORT}"
-
-    # Открыть порт панели в iptables если нужно
-    if ! iptables -C INPUT -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null; then
-        iptables -I INPUT 1 -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null || true
-        if command -v netfilter-persistent &>/dev/null; then
-            netfilter-persistent save >> "$LOG_FILE" 2>&1
-        elif command -v iptables-save &>/dev/null; then
-            mkdir -p /etc/iptables
-            iptables-save > /etc/iptables/rules.v4 2>/dev/null
-        fi
-    fi
 
     draw_info_box 62 \
         "${C_BOLD}${C_GREEN}telemt_panel установлена${C_RESET}" \
