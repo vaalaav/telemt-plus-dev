@@ -453,123 +453,49 @@ apply_mtproto_fixes_selfmask() {
     # Базовая оптимизация (MEKO sysctl + telemt tuning)
     opt_basic_optimization || true
 
-    # SYN FIX — адаптированный для selfmask (relaxed limits)
-    confirm_step "SYN FIX (адаптированный для selfmask)" && opt_syn_fix_selfmask || {
+    # SYN FIX — MEKO оригинал на порт 443
+    local save_port="${TELEMT_PORT:-}"
+    TELEMT_PORT="443"
+    confirm_step "SYN FIX (MEKO, порт 443)" && opt_syn_fix || {
         local s=$?
         (( s == 2 )) && { handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20; }
     }
+    TELEMT_PORT="$save_port"
 
-    # Firewall
-    opt_firewall || true
+    # КРИТИЧНО: убрать все standalone ACCEPT 443, которые обходят SYN FIX
+    # (добавлены sitemask_configure_nginx ранее для telemt bootstrap)
+    while iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null; do :; done
+    msg_ok "Standalone ACCEPT 443 удалены (трафик идёт через SYN FIX)"
 
-    msg_ok "Оптимизация selfmask завершена"
-}
+    # НЕ вызываем opt_firewall — порты уже открыты из sitemask_configure_nginx
+    # opt_firewall добавит ACCEPT 443 на позицию 1 и обойдёт SYN FIX
+    # Порт 80 уже открыт, порт 443 обслуживается через MTPR_SYNFIX
 
-# ══════════════════════════════════════════════════════════════════
-#  SYN FIX для selfmask — повышенные лимиты
-#  iOS-правила (length=64, ttl<65): 15/sec burst 30 — как MEKO
-#  Общий SYN: 300/min burst 30 (vs MEKO 54/min burst 1)
-#  Браузер открывает 6-30 TCP при загрузке страницы → burst 30 ок
-#  DPI-сканеры (массовые SYN) всё равно отсекаются
-# ══════════════════════════════════════════════════════════════════
-opt_syn_fix_selfmask() {
-    msg_step "SYN FIX (selfmask — relaxed)"
-
-    local port="443"
-    local ssh_port
-    ssh_port=$(_get_ssh_port)
-
-    if _is_syn_fix_installed; then
-        msg_warn "SYN FIX уже установлен — пересоздаём с relaxed лимитами"
-        _opt_remove_syn_fix
+    # Открыть порт 80 если ещё не открыт (для ACME)
+    if ! iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null; then
+        iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
     fi
 
-    draw_info_box 62 \
-        "${C_BOLD}SYN FIX selfmask — адаптированные лимиты${C_RESET}" \
-        "" \
-        "iOS SYN (length=64 ttl<65): 15/sec burst 30" \
-        "  → как MEKO (браузеры не попадают)" \
-        "" \
-        "Общий SYN: ${C_WHITE}300/min burst 30${C_RESET}" \
-        "  → MEKO: 54/min burst 1 (ломает браузер)" \
-        "  → selfmask: 300/min burst 30 (сайт + прокси)" \
-        "" \
-        "Порт: ${C_WHITE}${port}${C_RESET}  SSH: ${C_WHITE}${ssh_port}${C_RESET}"
-
-    # iptables-persistent
-    if ! dpkg -s iptables-persistent &>/dev/null 2>&1; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent >> "$LOG_FILE" 2>&1 || {
-            msg_err "Не удалось установить iptables-persistent"
-            return 1
-        }
-    fi
-
-    # Защита SSH
-    if ! iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null; then
-        iptables -I INPUT 1 -p tcp --dport "$ssh_port" -j ACCEPT
-    fi
-
-    # Создание цепочки
-    iptables -N "$OPT_SYNFIX_CHAIN" 2>/dev/null || true
-    iptables -F "$OPT_SYNFIX_CHAIN"
-
-    if ! iptables -C INPUT -j "$OPT_SYNFIX_CHAIN" 2>/dev/null; then
-        iptables -I INPUT 2 -j "$OPT_SYNFIX_CHAIN"
-    fi
-
-    # Правило 1: iOS SYN — 15/sec burst 30 (как MEKO)
-    iptables -A "$OPT_SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -m length --length 64 \
-        -m ttl --ttl-lt 65 \
-        -m hashlimit \
-            --hashlimit-name "ios_mask_${port}" \
-            --hashlimit-mode srcip \
-            --hashlimit-upto 15/second \
-            --hashlimit-burst 30 \
-            --hashlimit-htable-expire 60000 \
-            --hashlimit-htable-size 32768 \
-        -j ACCEPT
-    msg_ok "iOS SYN: 15/sec burst 30 (MEKO)"
-
-    # Правило 2: iOS SYN сверх лимита → REJECT
-    iptables -A "$OPT_SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -m length --length 64 \
-        -m ttl --ttl-lt 65 \
-        -j REJECT --reject-with tcp-reset
-    msg_ok "iOS SYN exceed → REJECT"
-
-    # Правило 3: Общий SYN — 300/min burst 30 (RELAXED для selfmask)
-    iptables -A "$OPT_SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -m hashlimit \
-            --hashlimit-name "mtproto_mask_${port}" \
-            --hashlimit-mode srcip \
-            --hashlimit-upto 300/minute \
-            --hashlimit-burst 30 \
-            --hashlimit-htable-expire 60000 \
-            --hashlimit-htable-size 32768 \
-        -j ACCEPT
-    msg_ok "Общий SYN: 300/min burst 30 (selfmask)"
-
-    # Правило 4: Сверх лимита → REJECT
-    iptables -A "$OPT_SYNFIX_CHAIN" \
-        -p tcp --dport "$port" --syn \
-        -j REJECT --reject-with tcp-reset
-    msg_ok "SYN exceed → REJECT"
-
-    # Сохранение
-    mkdir -p "$OPT_STATE_DIR" /etc/iptables
-    echo "$port" > "$OPT_PORT_FILE"
+    # Сохранить финальное состояние iptables
     if command -v netfilter-persistent &>/dev/null; then
         netfilter-persistent save >> "$LOG_FILE" 2>&1
-    else
-        iptables-save > /etc/iptables/rules.v4
+    elif command -v iptables-save &>/dev/null; then
+        mkdir -p /etc/iptables
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null
     fi
 
-    rollback_push "_opt_remove_syn_fix"
-    msg_ok "SYN FIX selfmask установлен (relaxed: 300/min burst 30)"
+    msg_ok "Оптимизация selfmask завершена"
+
+    draw_info_box 62 \
+        "${C_BOLD}Selfmask оптимизации:${C_RESET}" \
+        "" \
+        " ${CHECK} MSS отключен в конфиге telemt" \
+        " ${CHECK} BBR + TCP Fast Open + somaxconn=65535" \
+        " ${CHECK} TCP keepalive: time=45, intvl=15, probes=3" \
+        " ${CHECK} telemt: max_connections=16384, handshake=15" \
+        " ${CHECK} LimitNOFILE=65535 (systemd override)" \
+        " ${CHECK} SYN FIX MEKO (54/min) — standalone ACCEPT убран" \
+        " ${CHECK} Порт 80 открыт (ACME), 443 через SYN FIX"
 }
 
 # ══════════════════════════════════════════════════════════════════
