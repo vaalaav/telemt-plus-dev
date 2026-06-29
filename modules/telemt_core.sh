@@ -20,6 +20,7 @@ TELEMT_TLS_DOMAIN=""
 TELEMT_SECRET=""
 TELEMT_AD_TAG=""
 TELEMT_PUBLIC_HOST=""
+TELEMT_VERSION=""
 
 # ── Определение архитектуры ───────────────────────────────────────
 _detect_arch() {
@@ -148,16 +149,77 @@ telemt_collect_params() {
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  Шаг 2: Скачивание бинарника
+#  Шаг 2: Выбор версии и скачивание бинарника
 # ══════════════════════════════════════════════════════════════════
+_telemt_select_version() {
+    msg_step "Выбор версии telemt"
+
+    local api_url="https://api.github.com/repos/${TELEMT_REPO}/releases"
+    local releases_json tags=()
+
+    releases_json=$(curl -fsSL --max-time 10 "$api_url" 2>/dev/null) || {
+        msg_warn "Не удалось получить список релизов — будет использована последняя"
+        TELEMT_VERSION="latest"
+        return 0
+    }
+
+    # Получить последние 5 тегов (jq → fallback на grep)
+    if command -v jq &>/dev/null; then
+        mapfile -t tags < <(echo "$releases_json" | jq -r '.[0:5][].tag_name' 2>/dev/null)
+    else
+        mapfile -t tags < <(echo "$releases_json" | grep -oP '"tag_name":\s*"\K[^"]+' | head -5)
+    fi
+
+    if [[ ${#tags[@]} -eq 0 ]]; then
+        msg_warn "Список релизов пуст — будет использована последняя"
+        TELEMT_VERSION="latest"
+        return 0
+    fi
+
+    echo ""
+    echo -e "  ${C_BOLD}Доступные версии telemt:${C_RESET}"
+    echo -e "  ${C_DIM}───────────────────────${C_RESET}"
+    local i
+    for i in "${!tags[@]}"; do
+        local label="${tags[$i]}"
+        [[ $i -eq 0 ]] && label="${label} ${C_GREEN}(последняя)${C_RESET}"
+        echo -e "    ${C_BOLD}[$((i+1))]${C_RESET} ${C_BOLD}${label}${C_RESET}"
+    done
+
+    local max=${#tags[@]}
+    local choice=""
+    while true; do
+        echo -ne "  ${C_BOLD}Версия${C_RESET} [1-${max}, Enter=1]: "
+        read -r choice </dev/tty || true
+        choice="${choice:-1}"
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= max )); then
+            break
+        fi
+        msg_warn "Неверный ввод. Введите число от ${C_BOLD}1${C_RESET} до ${C_BOLD}${max}${C_RESET}"
+    done
+
+    TELEMT_VERSION="${tags[$((choice-1))]}"
+    msg_ok "Выбрана версия: ${C_BOLD}${TELEMT_VERSION}${C_RESET}"
+}
+
 telemt_download() {
-    msg_step "Скачивание telemt"
+    # Выбор версии
+    _telemt_select_version
+
+    msg_step "Скачивание telemt ${TELEMT_VERSION:-latest}"
 
     local arch libc
     arch=$(_detect_arch) || return 1
     libc=$(_detect_libc)
 
-    local url="https://github.com/${TELEMT_REPO}/releases/latest/download/telemt-${arch}-linux-${libc}.tar.gz"
+    # URL: конкретная версия или latest
+    local url
+    if [[ "${TELEMT_VERSION:-latest}" == "latest" ]]; then
+        url="https://github.com/${TELEMT_REPO}/releases/latest/download/telemt-${arch}-linux-${libc}.tar.gz"
+    else
+        url="https://github.com/${TELEMT_REPO}/releases/download/${TELEMT_VERSION}/telemt-${arch}-linux-${libc}.tar.gz"
+    fi
+
     local tmp_dir
     tmp_dir=$(mktemp -d) || { msg_err "Не удалось создать временную директорию"; return 1; }
 
@@ -165,10 +227,13 @@ telemt_download() {
     msg_info "URL: ${url}"
 
     if ! run_with_spinner "Скачивание бинарника" curl -fSL --max-time 120 -o "${tmp_dir}/telemt.tar.gz" "$url"; then
-        # Попробовать fallback для x86_64 без суффикса v3
         if [[ "$arch" == "x86_64" ]]; then
             msg_warn "Основная ссылка недоступна, пробуем альтернативную..."
-            url="https://github.com/${TELEMT_REPO}/releases/latest/download/telemt-x86_64-linux-gnu.tar.gz"
+            if [[ "${TELEMT_VERSION:-latest}" == "latest" ]]; then
+                url="https://github.com/${TELEMT_REPO}/releases/latest/download/telemt-x86_64-linux-gnu.tar.gz"
+            else
+                url="https://github.com/${TELEMT_REPO}/releases/download/${TELEMT_VERSION}/telemt-x86_64-linux-gnu.tar.gz"
+            fi
             run_with_spinner "Скачивание (fallback)" curl -fSL --max-time 120 -o "${tmp_dir}/telemt.tar.gz" "$url" || {
                 rm -rf "$tmp_dir"
                 return 1
