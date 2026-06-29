@@ -228,150 +228,67 @@ do_github_push() {
 # Пока — минимальная реализация для тестирования каркаса.
 
 scenario_standard_install() {
-    if ! declare -F telemt_install &>/dev/null; then
-        msg_warn "Модуль telemt_core ещё не реализован"
-        return 0
+    # ══════════════════════════════════════════════════════════════
+    #  Сценарий 1: Стандартная установка
+    #  Обязательно: telemt + домен (ввод данных)
+    #  Опционально: фиксы DPI, панель
+    # ══════════════════════════════════════════════════════════════
+
+    # ── Обязательные шаги (молча) ─────────────────────────────────
+    telemt_install     || return 1
+    telemt_bind_domain || true
+
+    # ── Опциональные компоненты (с вопросом) ──────────────────────
+    echo ""
+    if confirm_yn "  ${C_BOLD}Установить фиксы DPI (MEKO)?${C_RESET}" "y"; then
+        apply_mtproto_fixes || true
     fi
 
-    local _do _s _h
-
-    # Шаг 1: Установка telemt
-    _do=false
-    confirm_step "Шаг 1: Установка telemt"; _s=$?
-    if [[ $_s -eq 0 ]]; then _do=true
-    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
-    [[ "$_do" == "true" ]] && { telemt_install || return 1; }
-
-    # Шаг 2: Привязка домена
-    _do=false
-    confirm_step "Шаг 2: Привязка домена"; _s=$?
-    if [[ $_s -eq 0 ]]; then _do=true
-    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
-    [[ "$_do" == "true" ]] && { telemt_bind_domain || true; }
-
-    # Шаг 3: Оптимизация и фиксы DPI
-    _do=false
-    confirm_step "Шаг 3: Оптимизация и фиксы DPI"; _s=$?
-    if [[ $_s -eq 0 ]]; then _do=true
-    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
-    [[ "$_do" == "true" ]] && { apply_mtproto_fixes || true; }
-
-    # Шаг 4: Панель управления
-    _do=false
-    confirm_step "Шаг 4: Установка панели управления"; _s=$?
-    if [[ $_s -eq 0 ]]; then _do=true
-    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
-    [[ "$_do" == "true" ]] && { panel_install || true; }
+    echo ""
+    if confirm_yn "  ${C_BOLD}Установить панель управления (telemt_panel)?${C_RESET}" "n"; then
+        panel_install || true
+    fi
 
     return 0
 }
 
 scenario_site_install() {
     # ══════════════════════════════════════════════════════════════
-    #  Сценарий: Установка под свой сайт (selfmask)
-    #
-    #  Правильный порядок:
-    #    1. Параметры selfmask (домен, шаблон)
-    #    2. Зависимости (nginx, certbot)
-    #    3. Развёртывание сайта из шаблона GitHub
-    #    4. SSL-сертификат Let's Encrypt
-    #    5. Nginx (3 server-блока)
-    #    6. Установка telemt СРАЗУ с mask=true, port=443
-    #    7. Оптимизация DPI (selfmask-режим)
-    #    8. Панель управления
+    #  Сценарий 2: Установка под свой сайт (selfmask)
+    #  Обязательно: параметры → зависимости → сайт → SSL → nginx → telemt
+    #  Опционально: фиксы DPI, панель
     # ══════════════════════════════════════════════════════════════
 
-    # ── Шаг 1: Параметры selfmask ────────────────────────────────
-    local _do_s1=false
-    confirm_step "Шаг 1: Параметры selfmask (домен, шаблон сайта)"
-    local s=$?
-    if [[ $s -eq 0 ]]; then _do_s1=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    if [[ "$_do_s1" == "true" ]]; then
-        sitemask_collect_params || return 1
-    else
-        msg_warn "Без параметров selfmask установка невозможна"
-        return 1
+    # ── Обязательные шаги (молча, только сбор данных) ──────────────
+    sitemask_collect_params       || return 1
+    sitemask_install_deps         || return 1
+    sitemask_deploy_site          || return 1
+    sitemask_obtain_cert          || return 1
+    sitemask_configure_nginx      || return 1
+
+    # telemt с mask=true (параметры → скачивание → конфиг → сервис)
+    TELEMT_PORT="443"
+    TELEMT_PUBLIC_HOST="${MASK_DOMAIN}"
+    sitemask_telemt_params        || return 1
+    telemt_download               || return 1
+    telemt_setup_env              || return 1
+    telemt_generate_config        || return 1
+    sitemask_update_telemt_config || return 1
+    telemt_create_service         || return 1
+    telemt_print_links
+
+    # ── Опциональные компоненты (с вопросом) ──────────────────────
+    echo ""
+    if confirm_yn "  ${C_BOLD}Установить фиксы DPI (MEKO, selfmask)?${C_RESET}" "y"; then
+        apply_mtproto_fixes_selfmask || true
     fi
 
-    # ── Шаг 2: Зависимости ───────────────────────────────────────
-    local _do_s2=false
-    confirm_step "Шаг 2: Установка зависимостей (nginx, certbot)"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s2=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    [[ "$_do_s2" == "true" ]] && { sitemask_install_deps || return 1; }
-
-    # ── Шаг 3: Развёртывание сайта из шаблона ────────────────────
-    local _do_s3=false
-    confirm_step "Шаг 3: Развёртывание сайта-маски из шаблона"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s3=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    [[ "$_do_s3" == "true" ]] && { sitemask_deploy_site || return 1; }
-
-    # ── Шаг 4: SSL-сертификат ────────────────────────────────────
-    local _do_s4=false
-    confirm_step "Шаг 4: Получение SSL-сертификата Let's Encrypt"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s4=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    [[ "$_do_s4" == "true" ]] && { sitemask_obtain_cert || return 1; }
-
-    # ── Шаг 5: Nginx (3 server-блока) ────────────────────────────
-    local _do_s5=false
-    confirm_step "Шаг 5: Настройка Nginx (3 server-блока selfmask)"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s5=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    [[ "$_do_s5" == "true" ]] && { sitemask_configure_nginx || return 1; }
-
-    # ── Шаг 6: Установка telemt с mask=true ──────────────────────
-    local _do_s6=false
-    confirm_step "Шаг 6: Установка telemt (порт 443, mask → nginx)"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s6=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    if [[ "$_do_s6" == "true" ]]; then
-        # Предустановить параметры telemt для selfmask-режима
-        TELEMT_PORT="443"
-        TELEMT_PUBLIC_HOST="${MASK_DOMAIN}"
-        # Собрать оставшиеся параметры (секрет, TLS-домен, ad_tag)
-        sitemask_telemt_params  || return 1
-        telemt_download         || return 1
-        telemt_setup_env        || return 1
-        telemt_generate_config  || return 1
-        # Дописать mask-настройки в конфиг
-        sitemask_update_telemt_config || return 1
-        telemt_create_service   || return 1
-        telemt_print_links
+    echo ""
+    if confirm_yn "  ${C_BOLD}Установить панель управления (telemt_panel)?${C_RESET}" "n"; then
+        panel_install || true
     fi
 
-    # ── Шаг 7: Оптимизация DPI ───────────────────────────────────
-    local _do_s7=false
-    confirm_step "Шаг 7: Оптимизация DPI (режим selfmask)"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s7=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    [[ "$_do_s7" == "true" ]] && { apply_mtproto_fixes_selfmask || true; }
-
-    # ── Шаг 8: Панель управления ─────────────────────────────────
-    local _do_s8=false
-    confirm_step "Шаг 8: Установка панели управления"
-    s=$?
-    if [[ $s -eq 0 ]]; then _do_s8=true
-    elif [[ $s -eq 2 ]]; then handle_cancel; local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-    fi
-    [[ "$_do_s8" == "true" ]] && { panel_install || true; }
-
-    # ── Шаг 9: Автопродление + финальная проверка ────────────────
+    # ── Финализация (молча) ───────────────────────────────────────
     sitemask_setup_renewal || true
     sitemask_verify || true
 
