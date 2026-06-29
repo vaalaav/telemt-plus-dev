@@ -108,13 +108,16 @@ run_with_spinner() {
     fi
 }
 
-# ── Горизонтальная линия ──────────────────────────────────────────
-draw_hline() {
-    local w="${1:-60}" char="${2:-$BOX_H}"
-    printf '%0.s'"$char" $(seq 1 "$w")
+# ── Блок информации (без правой рамки) ───────────────────────────
+draw_box() {
+    local text="$1" color="${2:-$C_CYAN}"
+    echo ""
+    echo -e "  ${color}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "  ${C_BOLD}  ${text}${C_RESET}"
+    echo -e "  ${color}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo ""
 }
 
-# ── Блок информации (левая акцентная полоса, без правой рамки) ────
 draw_info_box() {
     local _width="${1:-60}"
     shift
@@ -133,12 +136,25 @@ draw_info_box() {
     echo ""
 }
 
+draw_hline() {
+    local w="${1:-60}" char="${2:-$BOX_H}"
+    printf '%0.s'"$char" $(seq 1 "$w")
+}
+
 # ══════════════════════════════════════════════════════════════════
-#  ВВОД ДАННЫХ — защита от дурака (бесконечный цикл валидации)
+#  ВВОД И ПОДТВЕРЖДЕНИЯ — защита от дурака (while-циклы)
+#
+#  Правила:
+#   • Мелкие шаги (установка пакетов, создание папок) — БЕЗ
+#     подтверждений, скрипт выполняет их молча.
+#   • Подтверждения только на РАЗВИЛКАХ: старт сценария,
+#     выбор домена/шаблона, глобальная отмена.
+#   • Любой невалидный ввод → предупреждение + повтор вопроса.
+#     Скрипт НИКОГДА не падает от опечатки.
 # ══════════════════════════════════════════════════════════════════
 
-# ── Запрос строки с валидацией (regex) ────────────────────────────
-# Использование: prompt_input "Текст" VAR_NAME '^regex$' "default"
+# ── Запрос строки с валидацией (бесконечный цикл) ────────────────
+# prompt_input "Текст" VAR_NAME '^regex$' "default"
 prompt_input() {
     local prompt="$1" var_name="$2" pattern="${3:-.*}" default="${4:-}"
     local value
@@ -156,12 +172,12 @@ prompt_input() {
             eval "$var_name='$value'"
             return 0
         else
-            msg_warn "Недопустимый формат. Повторите ввод."
+            msg_warn "Неверный формат. Ожидается: ${C_DIM}${pattern}${C_RESET}"
         fi
     done
 }
 
-# ── Запрос секрета (без эха) ──────────────────────────────────────
+# ── Запрос секрета (без эха, бесконечный цикл) ───────────────────
 prompt_secret() {
     local prompt="$1" var_name="$2"
     local value
@@ -177,8 +193,8 @@ prompt_secret() {
     done
 }
 
-# ── Да/Нет (y/n) с защитой от опечаток ───────────────────────────
-# Возвращает: 0=да, 1=нет
+# ── Да/Нет (бесконечный цикл, только y/n) ────────────────────────
+# confirm_yn "Вопрос" "y|n"   →  return 0 (yes) / return 1 (no)
 confirm_yn() {
     local prompt="$1" default="${2:-n}"
     local hint="y/N"
@@ -186,18 +202,19 @@ confirm_yn() {
 
     while true; do
         echo -ne "  ${C_BOLD}${prompt}${C_RESET} [${hint}]: "
-        local answer
+        local answer=""
         read -r answer </dev/tty || true
         answer="${answer:-$default}"
         case "$answer" in
             [Yy]) return 0 ;;
             [Nn]) return 1 ;;
-            *)    msg_warn "Неверный ввод. Используйте ${C_BOLD}y${C_RESET} или ${C_BOLD}n${C_RESET}." ;;
+            *)    msg_warn "Неверный ввод. Используйте ${C_BOLD}y${C_RESET} или ${C_BOLD}n${C_RESET}" ;;
         esac
     done
 }
 
-# ── Трёхвариантный выбор для шагов (1/2/3) ───────────────────────
+# ── Трёхвариантный выбор для шагов (бесконечный цикл) ────────────
+# confirm_step "Название шага"
 # Возвращает: 0=подтвердить, 1=пропустить, 2=отмена
 confirm_step() {
     local step_name="$1"
@@ -210,65 +227,52 @@ confirm_step() {
         echo -e "    ${C_RED}${C_BOLD}[3]${C_RESET} ${C_BOLD}Отмена${C_RESET}"
         echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
-        local choice
+        local choice=""
         read -r choice </dev/tty || true
         case "$choice" in
             1|"") return 0 ;;
             2)    return 1 ;;
             3)    return 2 ;;
-            *)    msg_warn "Неверный ввод. Используйте ${C_BOLD}1${C_RESET}, ${C_BOLD}2${C_RESET} или ${C_BOLD}3${C_RESET}." ;;
+            *)    msg_warn "Неверный ввод. Используйте ${C_BOLD}1${C_RESET}, ${C_BOLD}2${C_RESET} или ${C_BOLD}3${C_RESET}" ;;
         esac
     done
 }
 
-# ── Обработка отмены: откат / пропуск / выход ─────────────────────
-# Возвращает: 0=откат, 1=пропустить, 2=выход в меню
+# ── Обработка отмены (бесконечный цикл) ──────────────────────────
+# Возвращает: 0=откат, 1=пропустить шаг, 2=выход в меню
 handle_cancel() {
     while true; do
         echo ""
-        echo -e "  ${C_RED}${C_BOLD}Операция отменена.${C_RESET} Что делать?"
+        echo -e "  ${C_RED}${C_BOLD}Операция отменена.${C_RESET} ${C_BOLD}Что делать?${C_RESET}"
         echo -e "    ${C_RED}${C_BOLD}[1]${C_RESET} ${C_BOLD}Полный откат действий текущей сессии${C_RESET}"
         echo -e "    ${C_YELLOW}${C_BOLD}[2]${C_RESET} ${C_BOLD}Пропустить этот шаг, продолжить${C_RESET}"
         echo -e "    ${C_CYAN}${C_BOLD}[3]${C_RESET} ${C_BOLD}Выход в главное меню${C_RESET}"
         echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
-        local choice
+        local choice=""
         read -r choice </dev/tty || true
         case "$choice" in
             1) return 0 ;;
             2) return 1 ;;
             3) return 2 ;;
-            *) msg_warn "Неверный ввод. Используйте ${C_BOLD}1${C_RESET}, ${C_BOLD}2${C_RESET} или ${C_BOLD}3${C_RESET}." ;;
+            *) msg_warn "Неверный ввод. Используйте ${C_BOLD}1${C_RESET}, ${C_BOLD}2${C_RESET} или ${C_BOLD}3${C_RESET}" ;;
         esac
     done
 }
 
-# ── Выбор из N вариантов (универсальный) ──────────────────────────
-# Использование: ask_choice "Заголовок" result_var "Вариант 1" "Вариант 2" ...
-# Записывает номер выбора (1-N) в result_var
+# ── Выбор из N вариантов (бесконечный цикл) ──────────────────────
+# ask_choice "Заголовок" 4    → ждёт ввод 1..4, возвращает номер
 ask_choice() {
-    local title="$1" var_name="$2"
-    shift 2
-    local options=("$@")
-    local count=${#options[@]}
-
+    local title="$1" max="$2"
     while true; do
-        echo ""
-        echo -e "  ${C_BOLD}${C_WHITE}${title}${C_RESET}"
-        echo -e "  ${C_DIM}───────────────${C_RESET}"
-        local i
-        for (( i=0; i<count; i++ )); do
-            echo -e "    ${C_GREEN}${C_BOLD}[$((i+1))]${C_RESET} ${C_BOLD}${options[i]}${C_RESET}"
-        done
-        echo -ne "  ${C_BOLD}Выбор${C_RESET} [1-${count}]: "
-
-        local choice
+        echo -ne "  ${C_BOLD}${title}${C_RESET} [1-${max}]: "
+        local choice=""
         read -r choice </dev/tty || true
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
-            eval "$var_name='$choice'"
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= max )); then
+            echo "$choice"
             return 0
         fi
-        msg_warn "Неверный ввод. Введите число от ${C_BOLD}1${C_RESET} до ${C_BOLD}${count}${C_RESET}."
+        msg_warn "Неверный ввод. Введите число от ${C_BOLD}1${C_RESET} до ${C_BOLD}${max}${C_RESET}"
     done
 }
 
@@ -300,9 +304,7 @@ rollback_execute() {
     msg_ok "Откат завершён"
 }
 
-rollback_clear() {
-    ROLLBACK_STACK=()
-}
+rollback_clear() { ROLLBACK_STACK=(); }
 
 # ── Проверка зависимостей ────────────────────────────────────────
 require_root() {
@@ -321,7 +323,7 @@ require_commands() {
         msg_info "Установка: ${missing[*]}..."
         apt-get update -qq >> "$LOG_FILE" 2>&1
         apt-get install -y -qq "${missing[@]}" >> "$LOG_FILE" 2>&1 && \
-            msg_ok "Установлено: ${missing[*]}" || \
+            msg_ok "Пакеты установлены" || \
             { msg_err "Не удалось установить: ${missing[*]}"; return 1; }
     fi
 }
@@ -381,6 +383,6 @@ setup_traps() {
     trap 'msg_warn "Прервано (SIGTERM)"; cleanup_on_exit; exit 143' TERM
 }
 
-# Инициализация при подключении модуля
+# Инициализация
 init_logging
 setup_traps
