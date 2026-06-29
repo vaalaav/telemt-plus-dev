@@ -39,7 +39,7 @@ panel_install() {
 
     # ── Сбор данных (прямой ввод, без подтверждений) ──────────────
     prompt_input "Порт панели" PANEL_PORT '^[0-9]+$' "8080"
-    PANEL_LISTEN="127.0.0.1:${PANEL_PORT}"
+    PANEL_LISTEN="0.0.0.0:${PANEL_PORT}"
 
     prompt_input "Имя администратора" PANEL_ADMIN_USER '^[a-zA-Z0-9_-]+$' "admin"
 
@@ -273,12 +273,41 @@ SVCEOF
     fi
 
     # ── Итог ──────────────────────────────────────────────────────
-    local access_url="http://127.0.0.1:${PANEL_PORT} (SSH-туннель: ssh -L ${PANEL_PORT}:127.0.0.1:${PANEL_PORT} root@SERVER)"
+    # Определить публичный URL (домен → IP)
+    local panel_host=""
+
+    # Проверить привязанный домен из конфига telemt
+    for f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
+        if [[ -f "$f" ]]; then
+            panel_host=$(grep -E '^public_host' "$f" 2>/dev/null | head -1 | awk -F'"' '{print $2}')
+            [[ -n "$panel_host" ]] && break
+        fi
+    done
+
+    # Если домена нет — определить публичный IP
+    if [[ -z "$panel_host" ]]; then
+        panel_host=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null || \
+                     curl -4s --max-time 3 api.ipify.org 2>/dev/null || \
+                     echo "ВАШ_IP")
+    fi
+
+    local access_url="http://${panel_host}:${PANEL_PORT}"
+
+    # Открыть порт панели в iptables если нужно
+    if ! iptables -C INPUT -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null; then
+        iptables -I INPUT 1 -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null || true
+        if command -v netfilter-persistent &>/dev/null; then
+            netfilter-persistent save >> "$LOG_FILE" 2>&1
+        elif command -v iptables-save &>/dev/null; then
+            mkdir -p /etc/iptables
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null
+        fi
+    fi
 
     draw_info_box 62 \
-        "${C_BOLD}telemt_panel установлена${C_RESET}" \
+        "${C_BOLD}${C_GREEN}telemt_panel установлена${C_RESET}" \
         "" \
-        "URL:      ${C_WHITE}${access_url}${C_RESET}" \
+        "URL:      ${C_CYAN}${access_url}${C_RESET}" \
         "Логин:    ${C_WHITE}${PANEL_ADMIN_USER}${C_RESET}" \
         "Пароль:   ${C_WHITE}${PANEL_ADMIN_PASS}${C_RESET}" \
         "" \
