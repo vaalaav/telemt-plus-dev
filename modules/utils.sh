@@ -35,12 +35,17 @@ init_logging() {
     mkdir -p "$LOG_DIR" 2>/dev/null || true
     touch "$LOG_FILE" 2>/dev/null || {
         LOG_FILE="/tmp/telemt-install-$(date +%Y%m%d-%H%M%S).log"
-        touch "$LOG_FILE"
+        touch "$LOG_FILE" 2>/dev/null || true
     }
 }
 
 # ── Логирование ───────────────────────────────────────────────────
-log_raw() { echo "[$(date '+%H:%M:%S')] $*" >> "$LOG_FILE" 2>/dev/null || true; }
+log_raw() {
+    # Пересоздать каталог если удалён (cleaner)
+    [[ -d "$LOG_DIR" ]] || mkdir -p "$LOG_DIR" 2>/dev/null || true
+    [[ -f "$LOG_FILE" ]] || touch "$LOG_FILE" 2>/dev/null || true
+    echo "[$(date '+%H:%M:%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
 
 msg_info()    { echo -e "  ${C_CYAN}${BULLET}${C_RESET} $*";       log_raw "INFO: $*"; }
 msg_ok()      { echo -e "  ${C_GREEN}${CHECK}${C_RESET} $*";       log_raw "OK:   $*"; }

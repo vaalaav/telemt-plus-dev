@@ -170,6 +170,9 @@ run_scenario() {
         return 0
     fi
 
+    # Пересоздать каталог логов (мог быть удалён cleaner-ом)
+    init_logging
+
     # Очистить стек отката для новой сессии
     rollback_clear
 
