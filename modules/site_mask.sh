@@ -438,21 +438,10 @@ print('OK')
         msg_ok "iptables: порты 80, 443 открыты"
     fi
 
-    # Защитить порт 8444 — только локальный доступ (telemt → nginx)
-    if ! iptables -C INPUT -p tcp --dport "${MASK_NGINX_BACKEND_PORT}" -s 127.0.0.0/8 -j ACCEPT 2>/dev/null; then
-        iptables -I INPUT 1 -p tcp --dport "${MASK_NGINX_BACKEND_PORT}" -s 127.0.0.0/8 -j ACCEPT 2>/dev/null || true
-    fi
-    if ! iptables -C INPUT -p tcp --dport "${MASK_NGINX_BACKEND_PORT}" -j DROP 2>/dev/null; then
-        iptables -A INPUT -p tcp --dport "${MASK_NGINX_BACKEND_PORT}" -j DROP 2>/dev/null || true
-    fi
-    # Сохранить iptables
-    if command -v netfilter-persistent &>/dev/null; then
-        netfilter-persistent save >> "$LOG_FILE" 2>&1
-    elif command -v iptables-save &>/dev/null; then
-        mkdir -p /etc/iptables
-        iptables-save > /etc/iptables/rules.v4 2>/dev/null
-    fi
-    msg_ok "Порт ${MASK_NGINX_BACKEND_PORT} защищён (только localhost)"
+    # Порт 8444 защищён nginx default_server (return 444 для чужого Host)
+    # НЕ добавляем iptables DROP — telemt подключается через публичный IP,
+    # а не 127.0.0.1, и DROP заблокирует TLS bootstrap
+    msg_ok "Порт ${MASK_NGINX_BACKEND_PORT} защищён nginx default_server"
 }
 
 # ══════════════════════════════════════════════════════════════════
