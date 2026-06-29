@@ -70,15 +70,18 @@ panel_install() {
         return 1
     }
 
-    # Найти бинарник для архитектуры
-    local download_url
+    # Найти tar.gz бинарник для нашей архитектуры + libc
+    local download_url libc
+    libc=$(_detect_libc 2>/dev/null || echo "gnu")
+
     download_url=$(echo "$release_json" | jq -r \
-        ".assets[] | select(.name | test(\"linux.*${arch}\")) | .browser_download_url" \
+        ".assets[] | select(.name | test(\"${arch}\") and test(\"${libc}\") and test(\"tar.gz\")) | .browser_download_url" \
         2>/dev/null | head -1)
 
     if [[ -z "$download_url" || "$download_url" == "null" ]]; then
+        # Fallback — любой tar.gz с архитектурой
         download_url=$(echo "$release_json" | jq -r \
-            ".assets[] | select(.name | test(\"${arch}\") and test(\"linux\")) | .browser_download_url" \
+            ".assets[] | select(.name | test(\"${arch}\") and test(\"tar.gz\")) | .browser_download_url" \
             2>/dev/null | head -1)
     fi
 
@@ -116,15 +119,45 @@ panel_install() {
         mv "${tmp_dir}/panel_archive" "${tmp_dir}/telemt-panel"
     fi
 
+    # Найти бинарник — гибкий поиск
     local bin_path
-    bin_path=$(find "$tmp_dir" -name "telemt-panel" -o -name "telemt_panel" 2>/dev/null | head -1)
-    [[ -z "$bin_path" ]] && bin_path=$(find "$tmp_dir" -type f -executable ! -name "*.tar.gz" ! -name "*.zip" 2>/dev/null | head -1)
 
+    # 1. Точное имя
+    bin_path=$(find "$tmp_dir" -name "telemt-panel" -type f 2>/dev/null | head -1)
+
+    # 2. С подчёркиванием
+    [[ -z "$bin_path" ]] && bin_path=$(find "$tmp_dir" -name "telemt_panel" -type f 2>/dev/null | head -1)
+
+    # 3. Любой файл с telemt-panel в имени (не .sha256, не .tar.gz)
+    [[ -z "$bin_path" ]] && bin_path=$(find "$tmp_dir" -name "telemt-panel*" -type f \
+        ! -name "*.sha256" ! -name "*.tar.gz" ! -name "*.zip" ! -name "*.md" 2>/dev/null | head -1)
+
+    # 4. Любой ELF-бинарник
     if [[ -z "$bin_path" ]]; then
-        msg_err "Бинарник панели не найден в архиве"
+        local f
+        for f in $(find "$tmp_dir" -type f 2>/dev/null); do
+            if file -b "$f" 2>/dev/null | grep -qi "ELF"; then
+                bin_path="$f"
+                break
+            fi
+        done
+    fi
+
+    # 5. Любой исполняемый файл
+    [[ -z "$bin_path" ]] && bin_path=$(find "$tmp_dir" -type f -executable \
+        ! -name "*.tar.gz" ! -name "*.zip" ! -name "*.sha256" 2>/dev/null | head -1)
+
+    # Отладка — что вообще в архиве
+    if [[ -z "$bin_path" ]]; then
+        msg_err "Бинарник панели не найден в архиве. Содержимое:"
+        find "$tmp_dir" -type f 2>/dev/null | head -10 | while read -r f; do
+            msg_info "  $(basename "$f") — $(file -b "$f" 2>/dev/null | head -c 60)"
+        done
         rm -rf "$tmp_dir"
         return 1
     fi
+
+    msg_info "Найден: $(basename "$bin_path")"
 
     install -m 0755 "$bin_path" "$PANEL_BIN"
     rm -rf "$tmp_dir"
