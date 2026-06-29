@@ -444,23 +444,26 @@ opt_firewall() {
 apply_mtproto_fixes_selfmask() {
     msg_header "Оптимизация DPI (режим selfmask)"
 
-    msg_info "В режиме selfmask прокси работает за nginx."
-    msg_info "SYN FIX применяется на внешний порт 443."
+    msg_info "В режиме selfmask прокси и сайт делят порт 443."
+    msg_info "SYN FIX НЕ применяется — он заблокирует браузерный трафик."
+    msg_info "(54/min burst 1 → браузер открывает 6-10 соединений → REJECT)"
     echo ""
 
     # MSS disable (MEKO)
     opt_disable_mss || true
 
-    # Базовая оптимизация (MEKO + reanimation)
+    # Базовая оптимизация (MEKO sysctl + telemt tuning)
+    # BBR, tcp_fastopen, somaxconn, keepalive, max_connections, LimitNOFILE
     opt_basic_optimization || true
 
-    # SYN FIX на 443 (MEKO)
-    local save_port="${TELEMT_PORT:-}"
-    TELEMT_PORT="443"
-    opt_syn_fix || true
-    TELEMT_PORT="$save_port"
+    # SYN FIX — ПРОПУСКАЕМ в selfmask!
+    # В selfmask защита обеспечивается:
+    #   - telemt TLS handshake валидация
+    #   - nginx default_server → return 444
+    #   - Легитимный сайт обманывает DPI
+    msg_info "SYN FIX пропущен (несовместим с selfmask)"
 
-    # Firewall
+    # Firewall — открыть порты (80 для ACME, 443 для трафика)
     opt_firewall || true
 
     msg_ok "Оптимизация selfmask завершена"
