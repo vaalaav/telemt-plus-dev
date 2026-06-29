@@ -139,12 +139,15 @@ print_menu() {
     echo -e "  ${C_BOLD}${C_WHITE}Главное меню${C_RESET}"
     echo -e "  ${C_DIM}────────────────────────────────────${C_RESET}"
     echo -e "    ${C_GREEN}[1]${C_RESET} ${C_BOLD}Стандартная установка${C_RESET}"
-    echo -e "        ${C_DIM}telemt + домен + фиксы DPI + панель${C_RESET}"
+    echo -e "        ${C_DIM}telemt + домен + фиксы DPI${C_RESET}"
     echo ""
     echo -e "    ${C_BLUE}[2]${C_RESET} ${C_BOLD}Установка под свой сайт${C_RESET}"
     echo -e "        ${C_DIM}+ маскировка (selfmask) + шаблон сайта${C_RESET}"
     echo ""
-    echo -e "    ${C_RED}[3]${C_RESET} ${C_BOLD}Полная очистка${C_RESET}"
+    echo -e "    ${C_MAGENTA}[3]${C_RESET} ${C_BOLD}Панель управления${C_RESET}"
+    echo -e "        ${C_DIM}Установка telemt_panel${C_RESET}"
+    echo ""
+    echo -e "    ${C_RED}[4]${C_RESET} ${C_BOLD}Полная очистка${C_RESET}"
     echo -e "        ${C_DIM}Удаление всех компонентов проекта${C_RESET}"
     echo ""
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
@@ -218,6 +221,12 @@ do_cleanup() {
         "cleaner"
 }
 
+do_panel_install() {
+    _load_module "panel" || return 1
+    init_logging
+    panel_install
+}
+
 do_github_push() {
     _load_module "github" || return 1
     github_push_project
@@ -245,9 +254,6 @@ scenario_standard_install() {
     fi
 
     echo ""
-    if confirm_yn "  ${C_BOLD}Установить панель управления (telemt_panel)?${C_RESET}" "n"; then
-        panel_install || true
-    fi
 
     return 0
 }
@@ -284,9 +290,6 @@ scenario_site_install() {
     fi
 
     echo ""
-    if confirm_yn "  ${C_BOLD}Установить панель управления (telemt_panel)?${C_RESET}" "n"; then
-        panel_install || true
-    fi
 
     # ── Финализация (молча) ───────────────────────────────────────
     sitemask_setup_renewal || true
@@ -321,14 +324,15 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-3]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-4]: "
         local choice=""
         read -r choice </dev/tty || true
 
         case "$choice" in
             1) do_standard_install ;;
             2) do_site_install     ;;
-            3) do_cleanup          ;;
+            3) do_panel_install    ;;
+            4) do_cleanup          ;;
             0)
                 echo ""
                 msg_info "До свидания!"
