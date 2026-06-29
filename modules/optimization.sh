@@ -464,6 +464,12 @@ apply_mtproto_fixes_selfmask() {
     while iptables -D INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null; do :; done
     msg_ok "Standalone ACCEPT 443 удалены (трафик идёт через SYN FIX)"
 
+    # Убедиться что conntrack ESTABLISHED,RELATED есть
+    if ! iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null; then
+        iptables -I INPUT 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        msg_ok "Добавлен conntrack ESTABLISHED,RELATED"
+    fi
+
     # НЕ вызываем opt_firewall — порты уже открыты из sitemask_configure_nginx
     # opt_firewall добавит ACCEPT 443 на позицию 1 и обойдёт SYN FIX
     # Порт 80 уже открыт, порт 443 обслуживается через MTPR_SYNFIX
@@ -501,11 +507,38 @@ apply_mtproto_fixes_selfmask() {
 apply_mtproto_fixes() {
     msg_header "Оптимизация и фиксы DPI"
 
-    # Все шаги выполняются молча — подтверждение было на уровне сценария
+    local proxy_port
+    proxy_port=$(_opt_detect_port)
+
+    # Все шаги молча
     opt_syn_fix            || msg_warn "SYN FIX — ошибка (пропущен)"
     opt_disable_mss        || true
     opt_basic_optimization || true
+
+    # Firewall — открыть порт, но ПОТОМ убрать standalone ACCEPT
+    # чтобы трафик шёл через SYN FIX
     opt_firewall           || true
+
+    # Если SYN FIX установлен — убрать standalone ACCEPT для прокси-порта
+    # (opt_firewall добавляет ACCEPT на позицию 1, обходя SYNFIX)
+    if _is_syn_fix_installed; then
+        while iptables -D INPUT -p tcp --dport "$proxy_port" -j ACCEPT 2>/dev/null; do :; done
+        msg_ok "Standalone ACCEPT ${proxy_port} удалён (трафик идёт через SYN FIX)"
+
+        # Убедиться что conntrack ESTABLISHED,RELATED есть (для ответных пакетов)
+        if ! iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null; then
+            iptables -I INPUT 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+            msg_ok "Добавлен conntrack ESTABLISHED,RELATED"
+        fi
+
+        # Сохранить
+        if command -v netfilter-persistent &>/dev/null; then
+            netfilter-persistent save >> "$LOG_FILE" 2>&1
+        elif command -v iptables-save &>/dev/null; then
+            mkdir -p /etc/iptables
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null
+        fi
+    fi
 
     echo ""
     msg_ok "Все фиксы DPI применены"
