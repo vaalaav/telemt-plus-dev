@@ -149,9 +149,6 @@ print_menu() {
     echo -e "    ${C_RED}[3]${C_RESET} ${C_BOLD}Полная очистка${C_RESET}"
     echo -e "        ${C_DIM}Удаление всех компонентов проекта${C_RESET}"
     echo ""
-    echo -e "    ${C_YELLOW}[4]${C_RESET} ${C_BOLD}GitHub: сохранить проект${C_RESET}"
-    echo -e "        ${C_DIM}Push скриптов в приватный репозиторий${C_RESET}"
-    echo ""
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
     echo -e "  ${C_DIM}────────────────────────────────────${C_RESET}"
 }
@@ -419,7 +416,7 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-4]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-3]: "
         local choice=""
         read -r choice </dev/tty || true
 
@@ -427,7 +424,6 @@ main() {
             1) do_standard_install ;;
             2) do_site_install     ;;
             3) do_cleanup          ;;
-            4) do_github_push      ;;
             0)
                 echo ""
                 msg_info "До свидания!"
