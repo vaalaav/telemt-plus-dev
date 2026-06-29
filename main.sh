@@ -160,10 +160,6 @@ run_scenario() {
     local modules_to_load=("$@")
 
     echo ""
-    if ! confirm_yn "${C_BOLD}Запустить: ${desc}?${C_RESET}" "n"; then
-        msg_info "Отменено, возврат в меню"
-        return 0
-    fi
 
     # Пересоздать каталог логов (мог быть удалён cleaner-ом)
     init_logging
@@ -211,6 +207,12 @@ do_site_install() {
 }
 
 do_cleanup() {
+    echo ""
+    echo -e "  ${C_RED}${C_BOLD}ВНИМАНИЕ: Это полностью удалит все компоненты и конфиги!${C_RESET}"
+    if ! confirm_yn "  ${C_BOLD}Вы уверены?${C_RESET}" "n"; then
+        msg_info "Отменено, возврат в меню"
+        return 0
+    fi
     run_scenario "cleanup" "Полная очистка системы" \
         "scenario_full_cleanup" \
         "cleaner"
