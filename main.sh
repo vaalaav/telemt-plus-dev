@@ -228,50 +228,38 @@ do_github_push() {
 scenario_standard_install() {
     if ! declare -F telemt_install &>/dev/null; then
         msg_warn "Модуль telemt_core ещё не реализован"
-        msg_info "Будет выполнено: telemt → домен → фиксы DPI → панель"
         return 0
     fi
 
+    local _do _s _h
+
     # Шаг 1: Установка telemt
-    confirm_step "Шаг 1: Установка telemt" || {
-        local s=$?
-        if [[ $s -eq 2 ]]; then
-            handle_cancel
-            local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-        fi
-        # s=1 → пропуск, идём дальше
-    }
-    declare -F telemt_install &>/dev/null && telemt_install
+    _do=false
+    confirm_step "Шаг 1: Установка telemt"; _s=$?
+    if [[ $_s -eq 0 ]]; then _do=true
+    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
+    [[ "$_do" == "true" ]] && { telemt_install || return 1; }
 
     # Шаг 2: Привязка домена
-    confirm_step "Шаг 2: Привязка домена" || {
-        local s=$?
-        if [[ $s -eq 2 ]]; then
-            handle_cancel
-            local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-        fi
-    }
-    declare -F telemt_bind_domain &>/dev/null && telemt_bind_domain
+    _do=false
+    confirm_step "Шаг 2: Привязка домена"; _s=$?
+    if [[ $_s -eq 0 ]]; then _do=true
+    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
+    [[ "$_do" == "true" ]] && { telemt_bind_domain || true; }
 
     # Шаг 3: Оптимизация и фиксы DPI
-    confirm_step "Шаг 3: Оптимизация и фиксы DPI" || {
-        local s=$?
-        if [[ $s -eq 2 ]]; then
-            handle_cancel
-            local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-        fi
-    }
-    declare -F apply_mtproto_fixes &>/dev/null && apply_mtproto_fixes
+    _do=false
+    confirm_step "Шаг 3: Оптимизация и фиксы DPI"; _s=$?
+    if [[ $_s -eq 0 ]]; then _do=true
+    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
+    [[ "$_do" == "true" ]] && { apply_mtproto_fixes || true; }
 
     # Шаг 4: Панель управления
-    confirm_step "Шаг 4: Установка панели управления" || {
-        local s=$?
-        if [[ $s -eq 2 ]]; then
-            handle_cancel
-            local h=$?; [[ $h -eq 0 ]] && return 10; [[ $h -eq 2 ]] && return 20
-        fi
-    }
-    declare -F panel_install &>/dev/null && panel_install
+    _do=false
+    confirm_step "Шаг 4: Установка панели управления"; _s=$?
+    if [[ $_s -eq 0 ]]; then _do=true
+    elif [[ $_s -eq 2 ]]; then handle_cancel; _h=$?; [[ $_h -eq 0 ]] && return 10; [[ $_h -eq 2 ]] && return 20; fi
+    [[ "$_do" == "true" ]] && { panel_install || true; }
 
     return 0
 }
