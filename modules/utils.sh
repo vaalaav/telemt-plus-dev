@@ -2,8 +2,6 @@
 # ═══════════════════════════════════════════════════════════════════
 #  modules/utils.sh — общие утилиты: цвета, логирование, TUI, откат
 # ═══════════════════════════════════════════════════════════════════
-# Не используем set -e — интерактивные функции (read, confirm)
-# штатно возвращают ненулевые коды
 
 # ── Цвета и стили ─────────────────────────────────────────────────
 readonly C_RESET='\e[0m'
@@ -41,7 +39,6 @@ init_logging() {
 
 # ── Логирование ───────────────────────────────────────────────────
 log_raw() {
-    # Пересоздать каталог если удалён (cleaner)
     [[ -d "$LOG_DIR" ]] || mkdir -p "$LOG_DIR" 2>/dev/null || true
     [[ -f "$LOG_FILE" ]] || touch "$LOG_FILE" 2>/dev/null || true
     echo "[$(date '+%H:%M:%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
@@ -77,7 +74,7 @@ spinner_stop() {
         kill "$_spinner_pid" 2>/dev/null; wait "$_spinner_pid" 2>/dev/null || true
     fi
     _spinner_pid=""
-    printf "\r\033[K"   # очистить строку
+    printf "\r\033[K"
     if [[ "$ok" == "true" ]]; then
         msg_ok "${2:-Готово}"
     else
@@ -99,7 +96,6 @@ run_cmd() {
     fi
 }
 
-# Выполнение с спиннером
 run_with_spinner() {
     local desc="$1"; shift
     spinner_start "$desc"
@@ -112,33 +108,20 @@ run_with_spinner() {
     fi
 }
 
-# ── Box-drawing утилиты ──────────────────────────────────────────
-# Рисует горизонтальную линию заданной ширины
+# ── Горизонтальная линия ──────────────────────────────────────────
 draw_hline() {
     local w="${1:-60}" char="${2:-$BOX_H}"
     printf '%0.s'"$char" $(seq 1 "$w")
 }
 
-# Рисует заголовок-блок (без рамки, с цветной линией)
-draw_box() {
-    local text="$1" color="${2:-$C_CYAN}"
-    echo ""
-    echo -e "  ${color}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
-    echo -e "  ${C_BOLD}  ${text}${C_RESET}"
-    echo -e "  ${color}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
-    echo ""
-}
-
-# Блок информации — чистый вывод без вертикальных линий
-# Использование: draw_info_box 60 "Заголовок" "" "Ключ: значение" ...
-# (ширина первого аргумента игнорируется для совместимости)
+# ── Блок информации (левая акцентная полоса, без правой рамки) ────
 draw_info_box() {
-    local _width="${1:-60}"  # совместимость, не используется
+    local _width="${1:-60}"
     shift
     local lines=("$@")
 
     echo ""
-    echo -e "  ${C_CYAN}▐${C_RESET}${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     for line in "${lines[@]}"; do
         if [[ -z "$line" ]]; then
             echo -e "  ${C_CYAN}▐${C_RESET}"
@@ -146,12 +129,16 @@ draw_info_box() {
             echo -e "  ${C_CYAN}▐${C_RESET}  ${line}"
         fi
     done
-    echo -e "  ${C_CYAN}▐${C_RESET}${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     echo ""
 }
 
-# ── Валидация ввода ──────────────────────────────────────────────
-# Запрос строки с валидацией
+# ══════════════════════════════════════════════════════════════════
+#  ВВОД ДАННЫХ — защита от дурака (бесконечный цикл валидации)
+# ══════════════════════════════════════════════════════════════════
+
+# ── Запрос строки с валидацией (regex) ────────────────────────────
+# Использование: prompt_input "Текст" VAR_NAME '^regex$' "default"
 prompt_input() {
     local prompt="$1" var_name="$2" pattern="${3:-.*}" default="${4:-}"
     local value
@@ -162,91 +149,130 @@ prompt_input() {
         read -r value </dev/tty || true
         value="${value:-$default}"
         if [[ -z "$value" ]]; then
-            msg_warn "Значение не может быть пустым"
+            msg_warn "Значение не может быть пустым. Повторите ввод."
             continue
         fi
         if [[ "$value" =~ $pattern ]]; then
             eval "$var_name='$value'"
             return 0
         else
-            msg_warn "Invalid input format"
+            msg_warn "Недопустимый формат. Повторите ввод."
         fi
     done
 }
 
-# Запрос секрета (без эха)
+# ── Запрос секрета (без эха) ──────────────────────────────────────
 prompt_secret() {
     local prompt="$1" var_name="$2"
     local value
-    echo -ne "  ${C_BOLD}${prompt}${C_RESET}: "
-    read -rs value </dev/tty || true
-    echo
-    if [[ -z "$value" ]]; then
-        msg_warn "Токен не может быть пустым"
-        return 1
-    fi
-    eval "$var_name='$value'"
-    return 0
+    while true; do
+        echo -ne "  ${C_BOLD}${prompt}${C_RESET}: "
+        read -rs value </dev/tty || true
+        echo
+        if [[ -n "$value" ]]; then
+            eval "$var_name='$value'"
+            return 0
+        fi
+        msg_warn "Значение не может быть пустым. Повторите ввод."
+    done
 }
 
-# ── Подтверждения ────────────────────────────────────────────────
-# Простое да/нет
+# ── Да/Нет (y/n) с защитой от опечаток ───────────────────────────
+# Возвращает: 0=да, 1=нет
 confirm_yn() {
     local prompt="$1" default="${2:-n}"
     local hint="y/N"
     [[ "$default" == "y" ]] && hint="Y/n"
 
-    echo -ne "  ${C_BOLD}${prompt}${C_RESET} [${hint}]: "
-    local answer
-    read -r answer </dev/tty || true
-    answer="${answer:-$default}"
-    [[ "$answer" =~ ^[Yy] ]]
+    while true; do
+        echo -ne "  ${C_BOLD}${prompt}${C_RESET} [${hint}]: "
+        local answer
+        read -r answer </dev/tty || true
+        answer="${answer:-$default}"
+        case "$answer" in
+            [Yy]) return 0 ;;
+            [Nn]) return 1 ;;
+            *)    msg_warn "Неверный ввод. Используйте ${C_BOLD}y${C_RESET} или ${C_BOLD}n${C_RESET}." ;;
+        esac
+    done
 }
 
-# Трёхвариантный выбор для шагов установки
+# ── Трёхвариантный выбор для шагов (1/2/3) ───────────────────────
 # Возвращает: 0=подтвердить, 1=пропустить, 2=отмена
 confirm_step() {
     local step_name="$1"
-    echo ""
-    echo -e "  ${C_BOLD}${C_WHITE}${step_name}${C_RESET}"
-    echo -e "  ${C_DIM}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${BOX_H_S}${C_RESET}"
-    echo -e "    ${C_GREEN}[1]${C_RESET} Подтвердить (Yes)"
-    echo -e "    ${C_YELLOW}[2]${C_RESET} Пропустить"
-    echo -e "    ${C_RED}[3]${C_RESET} Отмена"
-    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
+    while true; do
+        echo ""
+        echo -e "  ${C_BOLD}${C_WHITE}${step_name}${C_RESET}"
+        echo -e "  ${C_DIM}───────────────${C_RESET}"
+        echo -e "    ${C_GREEN}${C_BOLD}[1]${C_RESET} ${C_BOLD}Подтвердить (Yes)${C_RESET}"
+        echo -e "    ${C_YELLOW}${C_BOLD}[2]${C_RESET} ${C_BOLD}Пропустить${C_RESET}"
+        echo -e "    ${C_RED}${C_BOLD}[3]${C_RESET} ${C_BOLD}Отмена${C_RESET}"
+        echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
-    local choice
-    read -r choice </dev/tty || true
-    case "$choice" in
-        1|"") return 0 ;;
-        2)    return 1 ;;
-        3)    return 2 ;;
-        *)    msg_warn "Некорректный ввод, повторите"; confirm_step "$step_name" ;;
-    esac
+        local choice
+        read -r choice </dev/tty || true
+        case "$choice" in
+            1|"") return 0 ;;
+            2)    return 1 ;;
+            3)    return 2 ;;
+            *)    msg_warn "Неверный ввод. Используйте ${C_BOLD}1${C_RESET}, ${C_BOLD}2${C_RESET} или ${C_BOLD}3${C_RESET}." ;;
+        esac
+    done
 }
 
-# Обработка отмены: откат / пропуск / выход
-# Возвращает: 0=откат, 1=пропустить шаг, 2=выход в меню
+# ── Обработка отмены: откат / пропуск / выход ─────────────────────
+# Возвращает: 0=откат, 1=пропустить, 2=выход в меню
 handle_cancel() {
-    echo ""
-    echo -e "  ${C_RED}${C_BOLD}Операция отменена.${C_RESET} Что делать?"
-    echo -e "    ${C_RED}[1]${C_RESET} Полный откат действий текущей сессии"
-    echo -e "    ${C_YELLOW}[2]${C_RESET} Пропустить этот шаг, продолжить"
-    echo -e "    ${C_CYAN}[3]${C_RESET} Выход в главное меню"
-    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
+    while true; do
+        echo ""
+        echo -e "  ${C_RED}${C_BOLD}Операция отменена.${C_RESET} Что делать?"
+        echo -e "    ${C_RED}${C_BOLD}[1]${C_RESET} ${C_BOLD}Полный откат действий текущей сессии${C_RESET}"
+        echo -e "    ${C_YELLOW}${C_BOLD}[2]${C_RESET} ${C_BOLD}Пропустить этот шаг, продолжить${C_RESET}"
+        echo -e "    ${C_CYAN}${C_BOLD}[3]${C_RESET} ${C_BOLD}Выход в главное меню${C_RESET}"
+        echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
 
-    local choice
-    read -r choice </dev/tty || true
-    case "$choice" in
-        1) return 0 ;;
-        2) return 1 ;;
-        3) return 2 ;;
-        *) msg_warn "Некорректный ввод"; handle_cancel ;;
-    esac
+        local choice
+        read -r choice </dev/tty || true
+        case "$choice" in
+            1) return 0 ;;
+            2) return 1 ;;
+            3) return 2 ;;
+            *) msg_warn "Неверный ввод. Используйте ${C_BOLD}1${C_RESET}, ${C_BOLD}2${C_RESET} или ${C_BOLD}3${C_RESET}." ;;
+        esac
+    done
+}
+
+# ── Выбор из N вариантов (универсальный) ──────────────────────────
+# Использование: ask_choice "Заголовок" result_var "Вариант 1" "Вариант 2" ...
+# Записывает номер выбора (1-N) в result_var
+ask_choice() {
+    local title="$1" var_name="$2"
+    shift 2
+    local options=("$@")
+    local count=${#options[@]}
+
+    while true; do
+        echo ""
+        echo -e "  ${C_BOLD}${C_WHITE}${title}${C_RESET}"
+        echo -e "  ${C_DIM}───────────────${C_RESET}"
+        local i
+        for (( i=0; i<count; i++ )); do
+            echo -e "    ${C_GREEN}${C_BOLD}[$((i+1))]${C_RESET} ${C_BOLD}${options[i]}${C_RESET}"
+        done
+        echo -ne "  ${C_BOLD}Выбор${C_RESET} [1-${count}]: "
+
+        local choice
+        read -r choice </dev/tty || true
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
+            eval "$var_name='$choice'"
+            return 0
+        fi
+        msg_warn "Неверный ввод. Введите число от ${C_BOLD}1${C_RESET} до ${C_BOLD}${count}${C_RESET}."
+    done
 }
 
 # ── Система отката (Rollback) ────────────────────────────────────
-# Стек отката — массив команд, выполняемых в обратном порядке
 declare -ga ROLLBACK_STACK=()
 
 rollback_push() {
@@ -292,11 +318,10 @@ require_commands() {
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if [[ ${#missing[@]} -gt 0 ]]; then
-        msg_warn "Отсутствуют: ${missing[*]}"
-        msg_info "Установка недостающих пакетов..."
+        msg_info "Установка: ${missing[*]}..."
         apt-get update -qq >> "$LOG_FILE" 2>&1
         apt-get install -y -qq "${missing[@]}" >> "$LOG_FILE" 2>&1 && \
-            msg_ok "Пакеты установлены" || \
+            msg_ok "Установлено: ${missing[*]}" || \
             { msg_err "Не удалось установить: ${missing[*]}"; return 1; }
     fi
 }
@@ -344,11 +369,10 @@ get_service_status() {
 
 # ── Trap для корректного завершения ──────────────────────────────
 cleanup_on_exit() {
-    # Убить спиннер, если запущен
     if [[ -n "${_spinner_pid:-}" ]] && kill -0 "$_spinner_pid" 2>/dev/null; then
         kill "$_spinner_pid" 2>/dev/null || true
     fi
-    tput cnorm 2>/dev/null || true  # восстановить курсор
+    tput cnorm 2>/dev/null || true
 }
 
 setup_traps() {
