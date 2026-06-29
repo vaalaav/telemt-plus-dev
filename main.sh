@@ -88,29 +88,28 @@ print_status_panel() {
     local L_RM="RAM:           "  # 4 vis + 11 sp = 15
     local L_DK="Disk:          "  # 5 vis + 10 sp = 15
 
-    echo -e "  ${C_DIM}┌───────────────────────────────────────────────────────────┐${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}  ${C_BOLD}Состояние сервера${C_RESET}"
-    echo -e "  ${C_DIM}├───────────────────────────────────────────────────────────┤${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_OS}${C_WHITE}${os_info}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_UP}${C_WHITE}${uptime_info}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_IP}${C_WHITE}${server_ip}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_DM}${C_WHITE}${domain_info}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_CP}${C_WHITE}${cpu}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_RM}${C_WHITE}${ram}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${L_DK}${C_WHITE}${disk}${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   ${C_DIM}─── Сервисы ─────────────────────${C_RESET}"
-    echo -e "  ${C_DIM}│${C_RESET}   telemt:        ${st_telemt}"
-    echo -e "  ${C_DIM}│${C_RESET}   telemt-panel:  ${st_panel}"
-    echo -e "  ${C_DIM}│${C_RESET}   Nginx:         ${st_nginx}"
+    echo ""
+    echo -e "  ${C_CYAN}▐${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${C_BOLD}${C_WHITE}Состояние сервера${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_OS}${C_WHITE}${os_info}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_UP}${C_WHITE}${uptime_info}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_IP}${C_GREEN}${server_ip}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_DM}${C_WHITE}${domain_info}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_CP}${C_WHITE}${cpu}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_RM}${C_WHITE}${ram}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${L_DK}${C_WHITE}${disk}${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  ${C_DIM}── Сервисы ──${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  telemt:        ${st_telemt}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  telemt-panel:  ${st_panel}"
+    echo -e "  ${C_CYAN}▐${C_RESET}  Nginx:         ${st_nginx}"
 
     # Прокси-ссылка (если telemt установлен)
     local proxy_link=""
     if [[ -f /opt/telemt/proxy_links.txt ]]; then
         proxy_link=$(grep -E '^(tg://|https://t\.me/)' /opt/telemt/proxy_links.txt 2>/dev/null | head -1)
     fi
-    # Если файла нет — попробовать построить из конфига
     if [[ -z "$proxy_link" && -n "$_cfg" ]]; then
         local _secret _tls_domain _port _host
         _secret=$(grep -E '^hello[[:space:]]*=' "$_cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
@@ -126,13 +125,12 @@ print_status_panel() {
     fi
 
     if [[ -n "$proxy_link" ]]; then
-        echo -e "  ${C_DIM}│${C_RESET}"
-        echo -e "  ${C_DIM}│${C_RESET}   ${C_DIM}─── Прокси-ссылка ───────────────${C_RESET}"
-        echo -e "  ${C_DIM}│${C_RESET}   ${C_CYAN}${proxy_link}${C_RESET}"
+        echo -e "  ${C_CYAN}▐${C_RESET}"
+        echo -e "  ${C_CYAN}▐${C_RESET}  ${C_DIM}── Прокси ──${C_RESET}"
+        echo -e "  ${C_CYAN}▐${C_RESET}  ${C_CYAN}${proxy_link}${C_RESET}"
     fi
 
-    echo -e "  ${C_DIM}│${C_RESET}"
-    echo -e "  ${C_DIM}└───────────────────────────────────────────────────────────┘${C_RESET}"
+    echo -e "  ${C_CYAN}▐${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     echo ""
 }
 
