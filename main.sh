@@ -101,9 +101,44 @@ print_status_panel() {
     echo -e "  ${C_CYAN}▐${C_RESET}  ${L_DK}${C_WHITE}${disk}${C_RESET}"
     echo -e "  ${C_CYAN}▐${C_RESET}"
     echo -e "  ${C_CYAN}▐${C_RESET}  ${C_DIM}── Сервисы ──${C_RESET}"
-    echo -e "  ${C_CYAN}▐${C_RESET}  telemt:        ${st_telemt}"
+
+    # telemt — статус + версия
+    local telemt_ver=""
+    if [[ -f /bin/telemt ]]; then
+        telemt_ver=$(/bin/telemt --version 2>/dev/null | awk '{print $2}' | head -1)
+    fi
+    if [[ -n "$telemt_ver" ]]; then
+        echo -e "  ${C_CYAN}▐${C_RESET}  telemt:        ${st_telemt} ${C_DIM}(${telemt_ver})${C_RESET}"
+    else
+        echo -e "  ${C_CYAN}▐${C_RESET}  telemt:        ${st_telemt}"
+    fi
+
     echo -e "  ${C_CYAN}▐${C_RESET}  telemt-panel:  ${st_panel}"
     echo -e "  ${C_CYAN}▐${C_RESET}  Nginx:         ${st_nginx}"
+
+    # Режим установки
+    local install_mode="${C_DIM}Не определён${C_RESET}"
+    if [[ -n "$_cfg" ]]; then
+        if grep -q '^mask *= *true' "$_cfg" 2>/dev/null; then
+            install_mode="${C_BLUE}Selfmask (маскировка под сайт)${C_RESET}"
+        else
+            install_mode="${C_GREEN}Стандартный${C_RESET}"
+        fi
+    fi
+    echo -e "  ${C_CYAN}▐${C_RESET}  Режим:         ${install_mode}"
+
+    # Фиксы MEKO
+    local meko_status="${C_DIM}Не установлены${C_RESET}"
+    local meko_parts=()
+    iptables -L MTPR_SYNFIX -n &>/dev/null 2>&1 && meko_parts+=("SYN FIX")
+    [[ -f /etc/sysctl.d/99-telemt-tuning.conf ]] && meko_parts+=("sysctl")
+    [[ -d /etc/systemd/system/telemt.service.d ]] && meko_parts+=("LimitNOFILE")
+    if [[ ${#meko_parts[@]} -gt 0 ]]; then
+        local parts_str
+        parts_str=$(IFS=', '; echo "${meko_parts[*]}")
+        meko_status="${C_GREEN}● Активны${C_RESET} ${C_DIM}(${parts_str})${C_RESET}"
+    fi
+    echo -e "  ${C_CYAN}▐${C_RESET}  MEKO фиксы:    ${meko_status}"
 
     # Прокси-ссылка (если telemt установлен)
     local proxy_link=""
