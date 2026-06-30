@@ -130,6 +130,17 @@ print_status_panel() {
         echo -e "  ${C_CYAN}▐${C_RESET}  ${C_CYAN}${proxy_link}${C_RESET}"
     fi
 
+    # Панель управления (если установлена)
+    local panel_url=""
+    if [[ -f /var/lib/telemt-panel/credentials.txt ]]; then
+        panel_url=$(grep '^URL:' /var/lib/telemt-panel/credentials.txt 2>/dev/null | awk '{print $2}')
+    fi
+    if [[ -n "$panel_url" ]]; then
+        echo -e "  ${C_CYAN}▐${C_RESET}"
+        echo -e "  ${C_CYAN}▐${C_RESET}  ${C_DIM}── Панель ──${C_RESET}"
+        echo -e "  ${C_CYAN}▐${C_RESET}  ${C_MAGENTA}${panel_url}${C_RESET}"
+    fi
+
     echo -e "  ${C_CYAN}▐${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     echo ""
 }
