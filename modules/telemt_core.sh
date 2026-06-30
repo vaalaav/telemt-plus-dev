@@ -542,7 +542,42 @@ telemt_bind_domain() {
         if [[ "$resolved_ip" == "$server_ip" ]]; then
             msg_ok "DNS: ${TELEMT_PUBLIC_HOST} → ${resolved_ip}"
         else
-            msg_warn "DNS: ${resolved_ip}, ожидался ${server_ip} — проверьте A-запись"
+            # DNS не совпадает — цикл: повторить / отменить / продолжить
+            while true; do
+                msg_warn "DNS: ${resolved_ip}, ожидался ${server_ip}"
+                echo -e "    ${C_BOLD}[1]${C_RESET} Повторить проверку DNS"
+                echo -e "    ${C_BOLD}[2]${C_RESET} Отменить привязку домена"
+                echo -e "    ${C_BOLD}[3]${C_RESET} Привязать несмотря на несовпадение"
+                local dns_choice=""
+                while true; do
+                    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
+                    read -r dns_choice </dev/tty || true
+                    case "$dns_choice" in 1|2|3) break ;; *) msg_warn "Введите 1, 2 или 3" ;; esac
+                done
+
+                if [[ "$dns_choice" == "2" ]]; then
+                    msg_info "Привязка отменена — в ссылках будет IP-адрес"
+                    return 0
+                elif [[ "$dns_choice" == "3" ]]; then
+                    msg_info "Привязываем ${TELEMT_PUBLIC_HOST} несмотря на DNS"
+                    break
+                else
+                    # Повторная проверка
+                    msg_info "Повторная проверка DNS..."
+                    resolved_ip=""
+                    if command -v dig &>/dev/null; then
+                        resolved_ip=$(dig +short "$TELEMT_PUBLIC_HOST" A 2>/dev/null | head -1)
+                    elif command -v nslookup &>/dev/null; then
+                        resolved_ip=$(nslookup "$TELEMT_PUBLIC_HOST" 2>/dev/null | awk '/^Address:/{a=$2} END{print a}')
+                    elif command -v host &>/dev/null; then
+                        resolved_ip=$(host "$TELEMT_PUBLIC_HOST" 2>/dev/null | awk '/has address/{print $4; exit}')
+                    fi
+                    if [[ "$resolved_ip" == "$server_ip" ]]; then
+                        msg_ok "DNS: ${TELEMT_PUBLIC_HOST} → ${resolved_ip}"
+                        break
+                    fi
+                fi
+            done
         fi
     fi
 
