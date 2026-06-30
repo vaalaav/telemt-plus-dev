@@ -148,142 +148,49 @@ print_status_panel() {
 # ── Главное меню ──────────────────────────────────────────────────
 print_menu() {
     echo -e "  ${C_BOLD}${C_WHITE}Главное меню${C_RESET}"
-    echo -e "  ${C_DIM}────────────────────────────────────${C_RESET}"
-    echo -e "    ${C_GREEN}[1]${C_RESET} ${C_BOLD}Стандартная установка${C_RESET}"
-    echo -e "        ${C_DIM}telemt + домен + фиксы DPI${C_RESET}"
+    echo -e "  ${C_DIM}────────────────────────────────────────────${C_RESET}"
+    echo -e "    ${C_GREEN}${C_BOLD}[1]${C_RESET} ${C_BOLD}Установка ядра telemt${C_RESET}"
+    echo -e "        ${C_DIM}Выбор версии, порт, домен, прокси-ссылки${C_RESET}"
     echo ""
-    echo -e "    ${C_BLUE}[2]${C_RESET} ${C_BOLD}Установка под свой сайт${C_RESET}"
-    echo -e "        ${C_DIM}+ маскировка (selfmask) + шаблон сайта${C_RESET}"
+    echo -e "    ${C_BLUE}${C_BOLD}[2]${C_RESET} ${C_BOLD}Маскировка под веб-сайт (Selfmask)${C_RESET}"
+    echo -e "        ${C_DIM}Nginx + SSL + шаблон сайта + telemt mask${C_RESET}"
     echo ""
-    echo -e "    ${C_MAGENTA}[3]${C_RESET} ${C_BOLD}Панель управления${C_RESET}"
-    echo -e "        ${C_DIM}Установка telemt_panel${C_RESET}"
+    echo -e "    ${C_YELLOW}${C_BOLD}[3]${C_RESET} ${C_BOLD}Фиксы оптимизации MEKO${C_RESET}"
+    echo -e "        ${C_DIM}SYN FIX, BBR, sysctl, TCP-тюнинг${C_RESET}"
     echo ""
-    echo -e "    ${C_RED}[4]${C_RESET} ${C_BOLD}Полная очистка${C_RESET}"
-    echo -e "        ${C_DIM}Удаление всех компонентов проекта${C_RESET}"
+    echo -e "    ${C_MAGENTA}${C_BOLD}[4]${C_RESET} ${C_BOLD}Панель управления telemt${C_RESET}"
+    echo -e "        ${C_DIM}Веб-интерфейс для управления прокси${C_RESET}"
+    echo ""
+    echo -e "    ${C_RED}${C_BOLD}[5]${C_RESET} ${C_BOLD}Очистка системы${C_RESET}"
+    echo -e "        ${C_DIM}Пошаговый аудит и удаление компонентов${C_RESET}"
     echo ""
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
-    echo -e "  ${C_DIM}────────────────────────────────────${C_RESET}"
+    echo -e "  ${C_DIM}────────────────────────────────────────────${C_RESET}"
 }
 
-# ── Обработчики сценариев ─────────────────────────────────────────
+# ── Обработчики пунктов меню (прямые вызовы модулей) ──────────────
 
-# Обёртка: подтверждение → загрузка модуля → запуск → обработка отмен
-run_scenario() {
-    local name="$1" desc="$2" entry_fn="$3"
-    shift 3
-    local modules_to_load=("$@")
-
-    echo ""
-
-    # Пересоздать каталог логов (мог быть удалён cleaner-ом)
+do_telemt_install() {
+    _load_module "telemt_core" || return 1
     init_logging
+    rollback_clear
+    telemt_install     || { msg_err "Ошибка установки telemt"; return 1; }
+    telemt_bind_domain || true
+    msg_ok "Ядро telemt установлено"
+}
 
-    # Очистить стек отката для новой сессии
+do_selfmask_install() {
+    _load_module "telemt_core" || return 1
+    _load_module "site_mask"   || return 1
+    init_logging
     rollback_clear
 
-    # Загрузить все нужные модули
-    for mod in "${modules_to_load[@]}"; do
-        _load_module "$mod" || { msg_err "Не удалось загрузить модуль $mod"; return 1; }
-    done
-
-    # Запуск главной функции сценария
-    local rc=0
-    "$entry_fn" || rc=$?
-
-    case $rc in
-        0)  msg_ok "Сценарий «${name}» завершён успешно"
-            rollback_clear
-            ;;
-        10) # код 10 = пользователь запросил откат
-            rollback_execute
-            ;;
-        20) # код 20 = выход в меню без отката
-            msg_info "Возврат в главное меню"
-            ;;
-        *)  msg_err "Сценарий «${name}» завершился с ошибкой (код $rc)"
-            if confirm_yn "Выполнить откат изменений?" "y"; then
-                rollback_execute
-            fi
-            ;;
-    esac
-}
-
-do_standard_install() {
-    run_scenario "standard" "Стандартная установка" \
-        "scenario_standard_install" \
-        "telemt_core" "optimization" "panel"
-}
-
-do_site_install() {
-    run_scenario "sitemask" "Установка под свой сайт" \
-        "scenario_site_install" \
-        "telemt_core" "optimization" "panel" "site_mask"
-}
-
-do_cleanup() {
-    echo ""
-    echo -e "  ${C_RED}${C_BOLD}ВНИМАНИЕ: Это полностью удалит все компоненты и конфиги!${C_RESET}"
-    if ! confirm_yn "  ${C_BOLD}Вы уверены?${C_RESET}" "n"; then
-        msg_info "Отменено, возврат в меню"
-        return 0
-    fi
-    run_scenario "cleanup" "Полная очистка системы" \
-        "scenario_full_cleanup" \
-        "cleaner"
-}
-
-do_panel_install() {
-    _load_module "panel" || return 1
-    init_logging
-    panel_install
-}
-
-do_github_push() {
-    _load_module "github" || return 1
-    github_push_project
-}
-
-# ── Заглушки сценариев (для каркаса) ─────────────────────────────
-# Эти функции будут определены в соответствующих модулях.
-# Пока — минимальная реализация для тестирования каркаса.
-
-scenario_standard_install() {
-    # ══════════════════════════════════════════════════════════════
-    #  Сценарий 1: Стандартная установка
-    #  Обязательно: telemt + домен (ввод данных)
-    #  Опционально: фиксы DPI, панель
-    # ══════════════════════════════════════════════════════════════
-
-    # ── Обязательные шаги (молча) ─────────────────────────────────
-    telemt_install     || return 1
-    telemt_bind_domain || true
-
-    # ── Опциональные компоненты (с вопросом) ──────────────────────
-    echo ""
-    if confirm_yn "  ${C_BOLD}Установить фиксы DPI (MEKO)?${C_RESET}" "y"; then
-        apply_mtproto_fixes || true
-    fi
-
-    echo ""
-
-    return 0
-}
-
-scenario_site_install() {
-    # ══════════════════════════════════════════════════════════════
-    #  Сценарий 2: Установка под свой сайт (selfmask)
-    #  Обязательно: параметры → зависимости → сайт → SSL → nginx → telemt
-    #  Опционально: фиксы DPI, панель
-    # ══════════════════════════════════════════════════════════════
-
-    # ── Обязательные шаги (молча, только сбор данных) ──────────────
     sitemask_collect_params       || return 1
     sitemask_install_deps         || return 1
     sitemask_deploy_site          || return 1
     sitemask_obtain_cert          || return 1
     sitemask_configure_nginx      || return 1
 
-    # telemt с mask=true (параметры → скачивание → конфиг → сервис)
     TELEMT_PORT="443"
     TELEMT_PUBLIC_HOST="${MASK_DOMAIN}"
     sitemask_telemt_params        || return 1
@@ -294,39 +201,52 @@ scenario_site_install() {
     telemt_create_service         || return 1
     telemt_print_links
 
-    # ── Опциональные компоненты (с вопросом) ──────────────────────
-    echo ""
-    if confirm_yn "  ${C_BOLD}Установить фиксы DPI (MEKO, selfmask)?${C_RESET}" "y"; then
-        apply_mtproto_fixes_selfmask || true
-    fi
-
-    echo ""
-
-    # ── Финализация (молча) ───────────────────────────────────────
     sitemask_setup_renewal || true
     sitemask_verify || true
-
-    return 0
+    msg_ok "Selfmask настроен"
 }
 
-scenario_full_cleanup() {
-    if ! declare -F cleaner_run &>/dev/null; then
-        msg_warn "Модуль cleaner ещё не реализован"
-        return 0
+do_meko_fixes() {
+    _load_module "optimization" || return 1
+    _load_module "telemt_core"  || return 1
+    init_logging
+
+    # Определить режим: selfmask или стандартный
+    local cfg=""
+    for f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
+        [[ -f "$f" ]] && cfg="$f" && break
+    done
+
+    local is_selfmask=false
+    if [[ -n "$cfg" ]] && grep -q '^mask *= *true' "$cfg" 2>/dev/null; then
+        is_selfmask=true
     fi
+
+    if [[ "$is_selfmask" == "true" ]]; then
+        msg_info "Обнаружен режим selfmask — применяю адаптированные фиксы"
+        apply_mtproto_fixes_selfmask
+    else
+        apply_mtproto_fixes
+    fi
+}
+
+do_panel_install() {
+    _load_module "panel" || return 1
+    init_logging
+    panel_install
+}
+
+do_cleanup() {
+    _load_module "cleaner" || return 1
+    init_logging
     cleaner_run
 }
 
 # ── Главный цикл ─────────────────────────────────────────────────
 main() {
-    # Проверка root
     require_root
-
-    # Проверка базовых утилит
     require_commands curl git jq
 
-    # Отключаем set -e для интерактивного цикла —
-    # иначе любой read/status-check обрушит скрипт
     set +e
 
     while true; do
@@ -335,15 +255,16 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-4]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-5]: "
         local choice=""
         read -r choice </dev/tty || true
 
         case "$choice" in
-            1) do_standard_install ;;
-            2) do_site_install     ;;
-            3) do_panel_install    ;;
-            4) do_cleanup          ;;
+            1) do_telemt_install  ;;
+            2) do_selfmask_install ;;
+            3) do_meko_fixes      ;;
+            4) do_panel_install   ;;
+            5) do_cleanup         ;;
             0)
                 echo ""
                 msg_info "До свидания!"

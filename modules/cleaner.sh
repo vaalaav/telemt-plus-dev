@@ -1,113 +1,168 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
-#  modules/cleaner.sh — Полная очистка всех компонентов проекта
+#  modules/cleaner.sh — Интеллектуальная пошаговая очистка системы
+#  Аудит → детект компонентов → поочерёдное удаление с confirm_yn
 # ═══════════════════════════════════════════════════════════════════
 
-cleaner_run() {
-    msg_header "Полная очистка системы"
+# ── Детекторы компонентов ─────────────────────────────────────────
+_has_telemt() {
+    [[ -f /bin/telemt ]] || systemctl cat telemt.service &>/dev/null 2>&1
+}
 
-    msg_warn "Будут удалены ВСЕ компоненты, установленные этим проектом:"
-    echo ""
-    echo -e "    ${C_RED}•${C_RESET} telemt (бинарник, конфиг, сервис, пользователь)"
-    echo -e "    ${C_RED}•${C_RESET} telemt_panel (бинарник, конфиг, сервис, пользователь)"
-    echo -e "    ${C_RED}•${C_RESET} Nginx конфиги сайта-маски"
-    echo -e "    ${C_RED}•${C_RESET} Let's Encrypt сертификаты"
-    echo -e "    ${C_RED}•${C_RESET} Сайт-маска (/var/www/html)"
-    echo -e "    ${C_RED}•${C_RESET} iptables SYN FIX (цепочка MTPR_SYNFIX)"
-    echo -e "    ${C_RED}•${C_RESET} sysctl оптимизации"
-    echo -e "    ${C_RED}•${C_RESET} systemd override (LimitNOFILE)"
-    echo ""
+_has_panel() {
+    [[ -f /usr/local/bin/telemt-panel ]] || systemctl cat telemt-panel.service &>/dev/null 2>&1
+}
 
-    if ! confirm_yn "${C_RED}${C_BOLD}Вы уверены? Это действие необратимо!${C_RESET}" "n"; then
-        msg_info "Очистка отменена"
-        return 0
-    fi
+_has_sitemask() {
+    [[ -f /etc/nginx/sites-available/site ]] && grep -q 'selfmask\|mask_port\|telemt VPS Installer' /etc/nginx/sites-available/site 2>/dev/null
+}
 
-    # ── 1. Остановка сервисов ─────────────────────────────────────
-    msg_step "Остановка сервисов"
+_has_meko_fixes() {
+    [[ -f /etc/sysctl.d/99-telemt-tuning.conf ]] || \
+    iptables -L MTPR_SYNFIX -n &>/dev/null 2>&1 || \
+    [[ -d /etc/systemd/system/telemt.service.d ]]
+}
 
-    for svc in telemt telemt-panel telemt-syn-limit; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null; then
-            systemctl stop "$svc" >> "$LOG_FILE" 2>&1
-            msg_ok "Остановлен: ${svc}"
-        fi
-        if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-            systemctl disable "$svc" >> "$LOG_FILE" 2>&1
-        fi
-    done
+_has_nginx() {
+    command -v nginx &>/dev/null && systemctl is-active --quiet nginx 2>/dev/null
+}
 
-    # ── 2. Удаление systemd-юнитов ───────────────────────────────
-    msg_step "Удаление systemd-юнитов"
+_has_certs() {
+    command -v certbot &>/dev/null && certbot certificates 2>/dev/null | grep -q 'Certificate Name:'
+}
 
-    local units=(
-        /etc/systemd/system/telemt.service
-        /etc/systemd/system/telemt-panel.service
-        /etc/systemd/system/telemt-syn-limit.service
-    )
-    for u in "${units[@]}"; do
-        if [[ -f "$u" ]]; then
-            rm -f "$u"
-            msg_ok "Удалён: $(basename "$u")"
-        fi
-    done
+# ── Удаление: telemt ядро ─────────────────────────────────────────
+_clean_telemt() {
+    msg_step "Удаление telemt"
 
-    # systemd override
+    # Остановка
+    systemctl stop telemt 2>/dev/null || true
+    systemctl disable telemt 2>/dev/null || true
+
+    # Systemd
+    rm -f /etc/systemd/system/telemt.service
     rm -rf /etc/systemd/system/telemt.service.d
     systemctl daemon-reload
-    msg_ok "systemd перезагружен"
 
-    # ── 3. Удаление бинарников ───────────────────────────────────
-    msg_step "Удаление бинарников"
+    # Бинарник
+    rm -f /bin/telemt
 
-    for bin in /bin/telemt /usr/local/bin/telemt-panel /usr/local/sbin/telemt-syn-limit.sh /usr/local/sbin/telemt-ios-mss.sh; do
-        if [[ -f "$bin" ]]; then
-            rm -f "$bin"
-            msg_ok "Удалён: ${bin}"
+    # Конфиги и данные
+    rm -rf /etc/telemt /opt/telemt /opt/mtpr-simple
+
+    # Пользователь
+    if id -u telemt &>/dev/null; then
+        pkill -u telemt 2>/dev/null || true
+        sleep 1
+        userdel -r telemt 2>/dev/null || userdel telemt 2>/dev/null || true
+    fi
+    getent group telemt &>/dev/null && groupdel telemt 2>/dev/null || true
+
+    msg_ok "telemt удалён (бинарник, конфиг, сервис, пользователь)"
+}
+
+# ── Удаление: панель ──────────────────────────────────────────────
+_clean_panel() {
+    msg_step "Удаление telemt_panel"
+
+    systemctl stop telemt-panel 2>/dev/null || true
+    systemctl disable telemt-panel 2>/dev/null || true
+
+    rm -f /etc/systemd/system/telemt-panel.service
+    systemctl daemon-reload
+
+    rm -f /usr/local/bin/telemt-panel
+    rm -rf /etc/telemt-panel /var/lib/telemt-panel
+
+    # Nginx конфиг панели
+    rm -f /etc/nginx/sites-available/telemt-panel /etc/nginx/sites-enabled/telemt-panel
+    if command -v nginx &>/dev/null; then
+        nginx -t >> "$LOG_FILE" 2>&1 && systemctl reload nginx >> "$LOG_FILE" 2>&1 || true
+    fi
+
+    if id -u telemt-panel &>/dev/null; then
+        pkill -u telemt-panel 2>/dev/null || true
+        sleep 1
+        userdel telemt-panel 2>/dev/null || true
+    fi
+
+    msg_ok "telemt_panel удалена (бинарник, конфиг, сервис, данные)"
+}
+
+# ── Удаление: selfmask (nginx конфиги, сайт, сертификаты) ────────
+_clean_sitemask() {
+    msg_step "Удаление selfmask"
+
+    # Nginx конфиги
+    rm -f /etc/nginx/sites-available/site /etc/nginx/sites-enabled/site
+    rm -f /etc/nginx/sites-available/acme-temp /etc/nginx/sites-enabled/acme-temp
+
+    # Восстановить default nginx
+    if [[ -f /etc/nginx/sites-available/default ]]; then
+        ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
+    fi
+
+    if command -v nginx &>/dev/null; then
+        nginx -t >> "$LOG_FILE" 2>&1 && systemctl reload nginx >> "$LOG_FILE" 2>&1 || true
+    fi
+    msg_ok "Nginx конфиги selfmask удалены"
+
+    # Сайт-маска
+    if [[ -d /var/www/html ]]; then
+        rm -rf /var/www/html/.well-known 2>/dev/null || true
+        rm -rf /var/www/html/* 2>/dev/null || true
+        mkdir -p /var/www/html
+        echo '<h1>Welcome to nginx!</h1>' > /var/www/html/index.html 2>/dev/null || true
+        chown -R www-data:www-data /var/www/html 2>/dev/null || true
+        msg_ok "/var/www/html очищен"
+    fi
+
+    # SSL-сертификаты
+    if command -v certbot &>/dev/null; then
+        local certs
+        certs=$(certbot certificates 2>/dev/null | grep 'Certificate Name:' | awk '{print $3}')
+        if [[ -n "$certs" ]]; then
+            for cert_name in $certs; do
+                certbot delete --cert-name "$cert_name" --non-interactive >> "$LOG_FILE" 2>&1 && \
+                    msg_ok "Сертификат удалён: ${cert_name}" || \
+                    msg_warn "Не удалось удалить: ${cert_name}"
+            done
         fi
-    done
+    fi
 
-    # ── 4. Удаление конфигов и данных ────────────────────────────
-    msg_step "Удаление конфигов и данных"
+    # certbot cron
+    if crontab -l 2>/dev/null | grep -q 'certbot renew'; then
+        crontab -l 2>/dev/null | grep -v 'certbot renew' | crontab - 2>/dev/null || true
+        msg_ok "Cron certbot удалён"
+    fi
 
-    local dirs=(
-        /etc/telemt
-        /etc/telemt-panel
-        /opt/telemt
-        /opt/mtpr-simple
-        /opt/mtproxy-reanimation
-        /var/lib/telemt-panel
-    )
-    for d in "${dirs[@]}"; do
-        if [[ -d "$d" ]]; then
-            rm -rf "$d"
-            msg_ok "Удалена директория: ${d}"
-        fi
-    done
+    # Nginx — предложить остановить/удалить
+    if _has_nginx; then
+        echo ""
+        echo -e "    ${C_BOLD}[1]${C_RESET} Остановить Nginx (можно включить позже)"
+        echo -e "    ${C_BOLD}[2]${C_RESET} Полностью удалить Nginx"
+        echo -e "    ${C_BOLD}[3]${C_RESET} Оставить Nginx"
+        local ng=""
+        while true; do
+            echo -ne "  ${C_BOLD}Nginx${C_RESET} [1/2/3]: "
+            read -r ng </dev/tty || true
+            case "$ng" in
+                1) systemctl stop nginx; systemctl disable nginx >> "$LOG_FILE" 2>&1; msg_ok "Nginx остановлен"; break ;;
+                2) systemctl stop nginx 2>/dev/null; apt-get remove -y nginx nginx-common >> "$LOG_FILE" 2>&1; msg_ok "Nginx удалён"; break ;;
+                3) msg_info "Nginx оставлен"; break ;;
+                *) msg_warn "Введите 1, 2 или 3" ;;
+            esac
+        done
+    fi
 
-    # ── 5. Удаление пользователей ────────────────────────────────
-    msg_step "Удаление пользователей"
+    msg_ok "Selfmask удалён"
+}
 
-    for user in telemt telemt-panel; do
-        if id -u "$user" &>/dev/null; then
-            # Завершить все процессы пользователя
-            pkill -u "$user" 2>/dev/null || true
-            sleep 1
-            userdel -r "$user" 2>/dev/null || userdel "$user" 2>/dev/null || true
-            msg_ok "Удалён пользователь: ${user}"
-        fi
-    done
+# ── Удаление: фиксы MEKO ─────────────────────────────────────────
+_clean_meko_fixes() {
+    msg_step "Откат фиксов MEKO"
 
-    for grp in telemt; do
-        if getent group "$grp" &>/dev/null; then
-            groupdel "$grp" 2>/dev/null || true
-            msg_ok "Удалена группа: ${grp}"
-        fi
-    done
-
-    # ── 6. Откат iptables / nftables ────────────────────────────
-    msg_step "Откат iptables и nftables"
-
-    # Удалить кастомную цепочку MTPR_SYNFIX
+    # iptables SYN FIX
     local chain="MTPR_SYNFIX"
     if iptables -L "$chain" -n &>/dev/null; then
         iptables -D INPUT -j "$chain" 2>/dev/null || true
@@ -116,24 +171,21 @@ cleaner_run() {
         msg_ok "iptables: цепочка ${chain} удалена"
     fi
 
-    # Удалить все правила с упоминанием telemt-портов, добавленные нами
-    # (SSH-protect правило на порт прокси, etc.)
-    local proxy_port=""
-    [[ -f /opt/mtpr-simple/port ]] && proxy_port=$(cat /opt/mtpr-simple/port 2>/dev/null)
-    if [[ -n "$proxy_port" ]]; then
-        while iptables -D INPUT -p tcp --dport "$proxy_port" -j ACCEPT 2>/dev/null; do :; done
-        msg_ok "iptables: правила для порта ${proxy_port} удалены"
+    # Удалить standalone ACCEPT для прокси-портов (если остались)
+    local old_port=""
+    [[ -f /opt/mtpr-simple/port ]] && old_port=$(cat /opt/mtpr-simple/port 2>/dev/null)
+    if [[ -n "$old_port" ]]; then
+        while iptables -D INPUT -p tcp --dport "$old_port" -j ACCEPT 2>/dev/null; do :; done
     fi
 
-    # Сбросить INPUT policy на ACCEPT (MEKO/предыдущие установки могли поставить DROP)
-    local current_policy
-    current_policy=$(iptables -L INPUT -n 2>/dev/null | head -1 | awk -F'[()]' '{print $2}')
-    if [[ "$current_policy" == "DROP" ]]; then
-        msg_warn "iptables INPUT policy = DROP — сбрасываем на ACCEPT"
+    # Сбросить INPUT policy на ACCEPT
+    local policy
+    policy=$(iptables -L INPUT -n 2>/dev/null | head -1 | awk -F'[()]' '{print $2}') || true
+    if [[ "$policy" == "DROP" ]]; then
         iptables -P INPUT ACCEPT
         iptables -P FORWARD ACCEPT
         iptables -P OUTPUT ACCEPT
-        msg_ok "iptables: все policy сброшены на ACCEPT"
+        msg_ok "iptables: policy сброшен на ACCEPT"
     fi
 
     # Сохранить iptables
@@ -144,27 +196,23 @@ cleaner_run() {
         iptables-save > /etc/iptables/rules.v4 2>/dev/null
     fi
 
-    # Откат ВСЕХ nftables таблиц с упоминанием telemt
+    # nftables таблицы telemt
     if command -v nft &>/dev/null; then
         local nft_tables
         nft_tables=$(nft list tables 2>/dev/null | grep -i 'telemt\|mtpr\|syn_limit' | awk '{print $2, $3}') || true
         if [[ -n "$nft_tables" ]]; then
             while IFS=' ' read -r family table; do
                 nft delete table "$family" "$table" 2>/dev/null || true
-                msg_ok "nftables: удалена таблица ${family} ${table}"
             done <<< "$nft_tables"
         fi
-        # Также удалить известные таблицы напрямую
-        for tbl in telemt_limit telemt_ios2_fix telemt_syn_limit; do
+        for tbl in telemt_limit telemt_ios2_fix telemt_synlimit; do
             nft delete table inet "$tbl" 2>/dev/null || true
             nft delete table ip "$tbl" 2>/dev/null || true
         done
         msg_ok "nftables: telemt-таблицы очищены"
     fi
 
-    # ── 7. Откат sysctl ──────────────────────────────────────────
-    msg_step "Откат sysctl"
-
+    # sysctl
     local sysctl_files=(
         /etc/sysctl.d/99-telemt-tuning.conf
         /etc/sysctl.d/99-custom.conf
@@ -172,136 +220,106 @@ cleaner_run() {
         /etc/sysctl.d/99-bbr.conf
     )
     for f in "${sysctl_files[@]}"; do
-        if [[ -f "$f" ]]; then
-            rm -f "$f"
-            msg_ok "Удалён: ${f}"
-        fi
+        [[ -f "$f" ]] && rm -f "$f"
     done
     sysctl --system >> "$LOG_FILE" 2>&1
-    msg_ok "sysctl сброшен к дефолтам"
+    msg_ok "sysctl: возвращён к дефолтам Ubuntu 24.04"
 
-    # ── 8. Очистка Nginx ─────────────────────────────────────────
-    msg_step "Очистка Nginx"
+    # systemd override (LimitNOFILE)
+    rm -rf /etc/systemd/system/telemt.service.d 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
 
-    local nginx_files=(
-        /etc/nginx/sites-available/site
-        /etc/nginx/sites-available/telemt-panel
-        /etc/nginx/sites-available/acme-temp
-        /etc/nginx/sites-enabled/site
-        /etc/nginx/sites-enabled/telemt-panel
-        /etc/nginx/sites-enabled/acme-temp
-    )
-    local nginx_changed=false
-    for f in "${nginx_files[@]}"; do
-        if [[ -e "$f" ]]; then
-            rm -f "$f"
-            msg_ok "Удалён: $(basename "$f")"
-            nginx_changed=true
-        fi
-    done
+    msg_ok "Фиксы MEKO откачены"
+}
 
-    if [[ "$nginx_changed" == "true" ]]; then
-        # Восстановить default конфиг nginx
-        if [[ -f /etc/nginx/sites-available/default ]]; then
-            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null || true
-            msg_ok "Восстановлен nginx default"
-        fi
-        if command -v nginx &>/dev/null; then
-            nginx -t >> "$LOG_FILE" 2>&1 && systemctl reload nginx >> "$LOG_FILE" 2>&1 || \
-                msg_warn "nginx -t failed — проверьте конфигурацию вручную"
-        fi
-    else
-        msg_info "Nginx конфиги проекта не найдены"
-    fi
+# ══════════════════════════════════════════════════════════════════
+#  Главная точка входа: аудит → пошаговый демонтаж
+# ══════════════════════════════════════════════════════════════════
+cleaner_run() {
+    msg_header "Аудит и очистка системы"
 
-    # Остановить / удалить nginx полностью?
-    if command -v nginx &>/dev/null && systemctl is-active --quiet nginx 2>/dev/null; then
-        echo ""
-        echo -e "    ${C_YELLOW}[1]${C_RESET} Остановить и отключить Nginx (можно включить позже)"
-        echo -e "    ${C_RED}[2]${C_RESET} Полностью удалить Nginx (apt remove)"
-        echo -e "    ${C_DIM}[3]${C_RESET} Оставить Nginx работающим"
-        echo -ne "  ${C_BOLD}Nginx${C_RESET} [1/2/3]: "
-        local ng_choice=""
-        read -r ng_choice </dev/tty || true
-        case "$ng_choice" in
-            1)
-                systemctl stop nginx >> "$LOG_FILE" 2>&1 || true
-                systemctl disable nginx >> "$LOG_FILE" 2>&1 || true
-                msg_ok "Nginx остановлен и отключён"
-                ;;
-            2)
-                systemctl stop nginx >> "$LOG_FILE" 2>&1 || true
-                apt-get remove -y nginx nginx-common >> "$LOG_FILE" 2>&1 || true
-                apt-get autoremove -y >> "$LOG_FILE" 2>&1 || true
-                msg_ok "Nginx полностью удалён"
-                ;;
-            *)
-                msg_info "Nginx оставлен без изменений"
-                ;;
-        esac
-    fi
+    # ── Аудит ─────────────────────────────────────────────────────
+    local found_telemt=false found_panel=false found_mask=false found_meko=false
+    local found_count=0
 
-    # Очистка /var/www/html (сайт-маска + .well-known)
-    if confirm_yn "Очистить /var/www/html (сайт-маска)?" "y"; then
-        rm -rf /var/www/html/.well-known 2>/dev/null || true
-        rm -rf /var/www/html/* 2>/dev/null || true
-        # Восстановить дефолтную страницу nginx
-        mkdir -p /var/www/html
-        cat > /var/www/html/index.html << 'DEFHTML'
-<!doctype html><html><head><title>Welcome to nginx!</title></head>
-<body><h1>Welcome to nginx!</h1><p>If you see this page, nginx is installed.</p></body></html>
-DEFHTML
-        chown -R www-data:www-data /var/www/html 2>/dev/null || true
-        msg_ok "/var/www/html очищен и восстановлен"
-    fi
-
-    # ── 9. Let's Encrypt сертификаты ─────────────────────────────
-    msg_step "Let's Encrypt сертификаты"
-
-    if command -v certbot &>/dev/null; then
-        local certs
-        certs=$(certbot certificates 2>/dev/null | grep 'Certificate Name:' | awk '{print $3}')
-        if [[ -n "$certs" ]]; then
-            msg_info "Найденные сертификаты:"
-            for cert_name in $certs; do
-                echo -e "    ${C_YELLOW}•${C_RESET} ${cert_name}"
-            done
-            if confirm_yn "Удалить сертификаты Let's Encrypt?" "n"; then
-                for cert_name in $certs; do
-                    certbot delete --cert-name "$cert_name" --non-interactive >> "$LOG_FILE" 2>&1 && \
-                        msg_ok "Удалён сертификат: ${cert_name}" || \
-                        msg_warn "Не удалось удалить: ${cert_name}"
-                done
-            fi
-        else
-            msg_info "Сертификаты не найдены"
-        fi
-
-        # Удалить cron записи certbot renew если были добавлены нами
-        if crontab -l 2>/dev/null | grep -q 'certbot renew'; then
-            crontab -l 2>/dev/null | grep -v 'certbot renew' | crontab - 2>/dev/null || true
-            msg_ok "Cron для certbot renew удалён"
-        fi
-    else
-        msg_info "certbot не установлен — пропуск"
-    fi
-
-    # ── 10. Логи ─────────────────────────────────────────────────
-    msg_step "Очистка логов"
-    rm -rf /var/log/telemt-installer 2>/dev/null || true
-    msg_ok "Логи инсталлятора удалены"
-
-    # ── Итог ─────────────────────────────────────────────────────
     echo ""
-    msg_ok "Полная очистка завершена"
-    draw_info_box 58 \
-        "${C_BOLD}Удалено:${C_RESET}" \
-        "" \
-        " ${CHECK} Сервисы telemt, telemt-panel" \
-        " ${CHECK} Бинарники, конфиги, данные" \
-        " ${CHECK} Пользователи и группы" \
-        " ${CHECK} iptables SYN FIX" \
-        " ${CHECK} sysctl оптимизации" \
-        " ${CHECK} Nginx конфиги selfmask" \
-        " ${CHECK} Логи инсталлятора"
+    echo -e "  ${C_BOLD}Обнаруженные компоненты:${C_RESET}"
+    echo -e "  ${C_DIM}────────────────────────${C_RESET}"
+
+    if _has_telemt; then
+        echo -e "    ${C_GREEN}${CHECK}${C_RESET} ${C_BOLD}telemt${C_RESET} — ядро прокси"
+        found_telemt=true; ((found_count++))
+    fi
+
+    if _has_panel; then
+        echo -e "    ${C_GREEN}${CHECK}${C_RESET} ${C_BOLD}telemt_panel${C_RESET} — панель управления"
+        found_panel=true; ((found_count++))
+    fi
+
+    if _has_sitemask; then
+        echo -e "    ${C_GREEN}${CHECK}${C_RESET} ${C_BOLD}selfmask${C_RESET} — маскировка (Nginx + SSL + сайт)"
+        found_mask=true; ((found_count++))
+    fi
+
+    if _has_meko_fixes; then
+        echo -e "    ${C_GREEN}${CHECK}${C_RESET} ${C_BOLD}MEKO фиксы${C_RESET} — SYN FIX, sysctl, LimitNOFILE"
+        found_meko=true; ((found_count++))
+    fi
+
+    if [[ $found_count -eq 0 ]]; then
+        echo -e "    ${C_DIM}Ничего не найдено — система чистая${C_RESET}"
+        echo ""
+        return 0
+    fi
+
+    echo ""
+    msg_info "Найдено компонентов: ${C_BOLD}${found_count}${C_RESET}"
+    echo ""
+
+    # ── Пошаговое удаление ────────────────────────────────────────
+
+    if [[ "$found_panel" == "true" ]]; then
+        if confirm_yn "  ${C_BOLD}Удалить панель управления telemt_panel?${C_RESET}" "n"; then
+            _clean_panel
+        else
+            msg_info "telemt_panel — оставлена"
+        fi
+        echo ""
+    fi
+
+    if [[ "$found_mask" == "true" ]]; then
+        if confirm_yn "  ${C_BOLD}Удалить selfmask (сайт, SSL, Nginx конфиги)?${C_RESET}" "n"; then
+            _clean_sitemask
+        else
+            msg_info "Selfmask — оставлен"
+        fi
+        echo ""
+    fi
+
+    if [[ "$found_meko" == "true" ]]; then
+        if confirm_yn "  ${C_BOLD}Откатить фиксы MEKO (sysctl, iptables, nftables)?${C_RESET}" "n"; then
+            _clean_meko_fixes
+        else
+            msg_info "Фиксы MEKO — оставлены"
+        fi
+        echo ""
+    fi
+
+    if [[ "$found_telemt" == "true" ]]; then
+        if confirm_yn "  ${C_RED}${C_BOLD}Удалить ядро telemt (бинарник, конфиг, сервис)?${C_RESET}" "n"; then
+            _clean_telemt
+        else
+            msg_info "telemt — оставлен"
+        fi
+        echo ""
+    fi
+
+    # ── Логи инсталлятора ─────────────────────────────────────────
+    if confirm_yn "  ${C_BOLD}Удалить логи инсталлятора?${C_RESET}" "n"; then
+        rm -rf /var/log/telemt-installer 2>/dev/null || true
+        msg_ok "Логи удалены"
+    fi
+
+    echo ""
+    msg_ok "Очистка завершена"
 }
