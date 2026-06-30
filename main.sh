@@ -102,6 +102,17 @@ print_status_panel() {
     echo -e "  ${C_CYAN}▐${C_RESET}"
     echo -e "  ${C_CYAN}▐${C_RESET}  ${C_DIM}── Сервисы ──${C_RESET}"
 
+    # Режим установки (первым)
+    local install_mode="${C_DIM}Не определён${C_RESET}"
+    if [[ -n "$_cfg" ]]; then
+        if grep -q '^mask *= *true' "$_cfg" 2>/dev/null; then
+            install_mode="${C_BLUE}Selfmask (маскировка под сайт)${C_RESET}"
+        else
+            install_mode="${C_GREEN}Стандартный${C_RESET}"
+        fi
+    fi
+    echo -e "  ${C_CYAN}▐${C_RESET}  Режим:         ${install_mode}"
+
     # telemt — статус + версия
     local telemt_ver=""
     if [[ -f /bin/telemt ]]; then
@@ -115,17 +126,6 @@ print_status_panel() {
 
     echo -e "  ${C_CYAN}▐${C_RESET}  telemt-panel:  ${st_panel}"
     echo -e "  ${C_CYAN}▐${C_RESET}  Nginx:         ${st_nginx}"
-
-    # Режим установки
-    local install_mode="${C_DIM}Не определён${C_RESET}"
-    if [[ -n "$_cfg" ]]; then
-        if grep -q '^mask *= *true' "$_cfg" 2>/dev/null; then
-            install_mode="${C_BLUE}Selfmask (маскировка под сайт)${C_RESET}"
-        else
-            install_mode="${C_GREEN}Стандартный${C_RESET}"
-        fi
-    fi
-    echo -e "  ${C_CYAN}▐${C_RESET}  Режим:         ${install_mode}"
 
     # Фиксы MEKO
     local meko_status="${C_DIM}Не установлены${C_RESET}"
