@@ -6,7 +6,7 @@
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-REPO="https://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@github.com/vaalaav/telemt-plus-dev.git"
+REPO="https://github.com/vaalaav/telemt-plus-dev.git"
 INSTALL_DIR="/opt/telemt-installer"
 
 if [[ $EUID -ne 0 ]]; then
