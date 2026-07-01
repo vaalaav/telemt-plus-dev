@@ -31,12 +31,13 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - **Базовый** — классическая установка MTProto прокси с выбором порта, домена и генерацией прокси-ссылки
 - **Selfmask** — маскировка прокси под полноценный веб-сайт на порту 443 с SSL-сертификатом Let's Encrypt. Для внешнего наблюдателя сервер выглядит как обычный HTTPS-сайт
 
-**Дополнительные возможности:**
+**Дополнительные модули:**
 
 - 🔧 **Выбор версии** — динамический список из последних 5 релизов через GitHub API
 - 🌐 **Привязка домена** — автоматическая проверка DNS и подстановка домена в прокси-ссылки
 - 🛡️ **Фиксы оптимизации MEKO** — SYN FIX, BBR, TCP-тюнинг, обход DPI-блокировок
 - 📊 **Панель управления** — веб-интерфейс для мониторинга и управления прокси
+- 🔗 **Xray Upstream Tunnel** — маршрутизация трафика к Telegram через внешний VPN-туннель (VLESS, VMess, Shadowsocks)
 - 🧹 **Интеллектуальная очистка** — аудит установленных компонентов с пошаговым удалением
 - 🖥️ **CLI-утилита `mytelemtinfo`** — быстрое управление прокси из терминала
 
@@ -51,9 +52,10 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
   [3] Привязка домена к прокси
   [4] Применение фиксов оптимизации MEKO
   [5] Установка панели управления Telemt
+  [6] Xray Upstream Tunnel
 
 [ Система ]
-  [6] Полная или пошаговая очистка системы
+  [7] Полная или пошаговая очистка системы
   [0] Выход
 ```
 
@@ -68,6 +70,21 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - [Market Terminal Template](https://github.com/vaalaav/Market-Terminal-Template)
 - [Kotorunner](https://github.com/vaalaav/kotorunner)
 - Любой публичный Git-репозиторий
+
+### 🔗 Xray Upstream Tunnel
+
+Весь исходящий трафик от telemt к серверам Telegram маршрутизируется через внешний VPN-туннель. Достаточно вставить ключ подключения — скрипт автоматически настроит всю цепочку:
+
+```
+Telegram клиент → telemt → Xray SOCKS5 → внешний сервер → Telegram DC
+```
+
+Поддерживаемые протоколы:
+- **VLESS** — `vless://...` (включая Reality и gRPC)
+- **VMess** — `vmess://...`
+- **Shadowsocks** — `ss://...`
+
+Маршрутизация настроена точечно: через туннель идёт только трафик к подсетям Telegram (9 IPv4 + 5 IPv6 CIDR), остальной — напрямую.
 
 ### 🛡️ Оптимизация MEKO
 
@@ -87,6 +104,11 @@ sudo mytelemtinfo
 
 Позволяет редактировать конфиг, применять SYN-fix, перезапускать или останавливать сервис, а также запускать очистку — всё из одного меню.
 
+Отдельная установка утилиты:
+```bash
+sudo curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/modules/mytelemtinfo -o /usr/local/bin/mytelemtinfo && sudo chmod +x /usr/local/bin/mytelemtinfo
+```
+
 ---
 
 ## 🇬🇧 English
@@ -104,12 +126,13 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - **Standard** — classic MTProto proxy setup with custom port, domain binding, and proxy link generation
 - **Selfmask** — disguise the proxy as a real website on port 443 with a Let's Encrypt SSL certificate. To any external observer, the server looks like a regular HTTPS website
 
-**Additional features:**
+**Additional modules:**
 
 - 🔧 **Version selector** — dynamic list of last 5 releases via GitHub API
 - 🌐 **Domain binding** — automatic DNS verification and domain substitution in proxy links
 - 🛡️ **MEKO optimization fixes** — SYN FIX, BBR, TCP tuning, DPI bypass
 - 📊 **Control panel** — web interface for proxy monitoring and management
+- 🔗 **Xray Upstream Tunnel** — route Telegram traffic through an external VPN tunnel (VLESS, VMess, Shadowsocks)
 - 🧹 **Smart cleanup** — component audit with step-by-step removal
 - 🖥️ **CLI utility `mytelemtinfo`** — quick proxy management from terminal
 
@@ -124,9 +147,10 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
   [3] Bind domain to proxy
   [4] Apply MEKO optimization fixes
   [5] Install Telemt control panel
+  [6] Xray Upstream Tunnel
 
 [ System ]
-  [6] Full or step-by-step cleanup
+  [7] Full or step-by-step cleanup
   [0] Exit
 ```
 
@@ -141,6 +165,21 @@ Built-in site templates:
 - [Market Terminal Template](https://github.com/vaalaav/Market-Terminal-Template)
 - [Kotorunner](https://github.com/vaalaav/kotorunner)
 - Any public Git repository
+
+### 🔗 Xray Upstream Tunnel
+
+All outgoing traffic from telemt to Telegram servers is routed through an external VPN tunnel. Simply paste a connection key — the script will automatically configure the entire chain:
+
+```
+Telegram client → telemt → Xray SOCKS5 → external server → Telegram DC
+```
+
+Supported protocols:
+- **VLESS** — `vless://...` (including Reality and gRPC)
+- **VMess** — `vmess://...`
+- **Shadowsocks** — `ss://...`
+
+Routing is precise: only Telegram subnet traffic (9 IPv4 + 5 IPv6 CIDRs) goes through the tunnel, everything else goes direct.
 
 ### 🛡️ MEKO Optimization
 
@@ -160,6 +199,11 @@ sudo mytelemtinfo
 
 Edit config, apply SYN-fix, restart or stop the service, and run cleanup — all from one menu.
 
+Standalone utility install:
+```bash
+sudo curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/modules/mytelemtinfo -o /usr/local/bin/mytelemtinfo && sudo chmod +x /usr/local/bin/mytelemtinfo
+```
+
 ---
 
 ## 📚 Ссылки / References
@@ -171,6 +215,7 @@ Edit config, apply SYN-fix, restart or stop the service, and run cleanup — all
 | MEKO DPI Fix | [github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO) |
 | MTProxy Reanimation | [github.com/Liafanx/MTproxy-reanimation](https://github.com/Liafanx/MTproxy-reanimation) |
 | Telemt Panel | [github.com/amirotin/telemt_panel](https://github.com/amirotin/telemt_panel) |
+| Xray Core | [github.com/XTLS/Xray-core](https://github.com/XTLS/Xray-core) |
 
 ---
 
