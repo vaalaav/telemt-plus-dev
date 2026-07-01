@@ -82,6 +82,99 @@ _print_status() {
     echo ""
 }
 
+# ── Очистка (вызов установленного cleaner или встроенная) ─────────
+_run_cleaner() {
+    local installer_dir="/opt/telemt-installer"
+    if [[ -f "${installer_dir}/modules/utils.sh" && -f "${installer_dir}/modules/cleaner.sh" ]]; then
+        source "${installer_dir}/modules/utils.sh"
+        source "${installer_dir}/modules/cleaner.sh"
+        cleaner_run
+        return
+    fi
+
+    # Встроенный аудит
+    echo ""
+    echo -e "  ${CB}${CW}Аудит и очистка системы${CR}"
+    echo -e "  ${CD}━━━━━━━━━━━━━━━━━━━━━━━━${CR}"
+
+    local found=0
+
+    # Панель
+    if [[ -f /usr/local/bin/telemt-panel ]] || systemctl cat telemt-panel.service &>/dev/null 2>&1; then
+        ((found++))
+        echo -ne "  ${CB}Удалить панель telemt_panel? [y/N]:${CR} "
+        local a; read -r a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            systemctl stop telemt-panel 2>/dev/null; systemctl disable telemt-panel 2>/dev/null
+            rm -f /etc/systemd/system/telemt-panel.service /usr/local/bin/telemt-panel
+            rm -rf /etc/telemt-panel /var/lib/telemt-panel
+            rm -f /etc/nginx/sites-available/telemt-panel /etc/nginx/sites-enabled/telemt-panel
+            id -u telemt-panel &>/dev/null && { pkill -u telemt-panel 2>/dev/null; userdel telemt-panel 2>/dev/null; } || true
+            systemctl daemon-reload
+            echo -e "  ${CG}✔${CR} telemt_panel удалена"
+        fi
+    fi
+
+    # Selfmask
+    if [[ -f /etc/nginx/sites-available/site ]] && grep -q 'selfmask\|telemt VPS Installer' /etc/nginx/sites-available/site 2>/dev/null; then
+        ((found++))
+        echo -ne "  ${CB}Удалить selfmask (сайт + SSL + Nginx)? [y/N]:${CR} "
+        local a; read -r a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            rm -f /etc/nginx/sites-available/site /etc/nginx/sites-enabled/site
+            rm -f /etc/nginx/sites-available/acme-temp /etc/nginx/sites-enabled/acme-temp
+            [[ -f /etc/nginx/sites-available/default ]] && ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default 2>/dev/null
+            rm -rf /var/www/html/* 2>/dev/null; echo '<h1>nginx</h1>' > /var/www/html/index.html 2>/dev/null
+            command -v certbot &>/dev/null && {
+                for cn in $(certbot certificates 2>/dev/null | grep 'Certificate Name:' | awk '{print $3}'); do
+                    certbot delete --cert-name "$cn" --non-interactive 2>/dev/null
+                done
+            }
+            crontab -l 2>/dev/null | grep -v 'certbot renew' | crontab - 2>/dev/null
+            nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null
+            echo -e "  ${CG}✔${CR} Selfmask удалён"
+        fi
+    fi
+
+    # MEKO
+    if [[ -f /etc/sysctl.d/99-telemt-tuning.conf ]] || iptables -L MTPR_SYNFIX -n &>/dev/null 2>&1 || [[ -d /etc/systemd/system/telemt.service.d ]]; then
+        ((found++))
+        echo -ne "  ${CB}Откатить фиксы MEKO (sysctl, iptables)? [y/N]:${CR} "
+        local a; read -r a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            iptables -L MTPR_SYNFIX -n &>/dev/null && {
+                iptables -D INPUT -j MTPR_SYNFIX 2>/dev/null; iptables -F MTPR_SYNFIX 2>/dev/null; iptables -X MTPR_SYNFIX 2>/dev/null
+            }
+            local pol; pol=$(iptables -L INPUT -n 2>/dev/null | head -1 | awk -F'[()]' '{print $2}')
+            [[ "$pol" == "DROP" ]] && iptables -P INPUT ACCEPT
+            mkdir -p /etc/iptables; iptables-save > /etc/iptables/rules.v4 2>/dev/null
+            for tbl in telemt_limit telemt_ios2_fix telemt_synlimit; do nft delete table inet "$tbl" 2>/dev/null; nft delete table ip "$tbl" 2>/dev/null; done
+            rm -f /etc/sysctl.d/99-telemt-tuning.conf /etc/sysctl.d/99-custom.conf /etc/sysctl.d/99-bbr.conf
+            sysctl --system &>/dev/null
+            rm -rf /etc/systemd/system/telemt.service.d; systemctl daemon-reload 2>/dev/null
+            echo -e "  ${CG}✔${CR} Фиксы MEKO откачены"
+        fi
+    fi
+
+    # Ядро
+    if [[ -f /bin/telemt ]] || systemctl cat telemt.service &>/dev/null 2>&1; then
+        ((found++))
+        echo -ne "  ${CRED}${CB}Удалить ядро telemt? [y/N]:${CR} "
+        local a; read -r a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            systemctl stop telemt 2>/dev/null; systemctl disable telemt 2>/dev/null
+            rm -f /etc/systemd/system/telemt.service /bin/telemt /usr/local/bin/mytelemtinfo
+            rm -rf /etc/telemt /opt/telemt /opt/mtpr-simple /etc/systemd/system/telemt.service.d
+            id -u telemt &>/dev/null && { pkill -u telemt 2>/dev/null; userdel -r telemt 2>/dev/null; } || true
+            getent group telemt &>/dev/null && groupdel telemt 2>/dev/null
+            systemctl daemon-reload
+            echo -e "  ${CG}✔${CR} telemt удалён"
+        fi
+    fi
+
+    [[ $found -eq 0 ]] && echo -e "  ${CD}Система чистая${CR}" || echo -e "\n  ${CG}✔${CR} Очистка завершена"
+}
+
 _apply_synfix() {
     local cfg; cfg=$(_detect_config)
     if [[ -z "$cfg" ]]; then
@@ -137,14 +230,15 @@ main() {
         echo -e "    ${CB}[2]${CR} ${CB}Применить SYN-fix${CR}"
         echo -e "    ${CB}[3]${CR} ${CB}Перезапустить сервис${CR}"
         echo -e "    ${CB}[4]${CR} ${CB}Остановить сервис${CR}"
-        echo -e "    ${CB}[5]${CR} ${CB}Выход${CR}"
+        echo -e "    ${CB}[5]${CR} ${CB}Пошаговая очистка системы${CR}"
+        echo -e "    ${CB}[6]${CR} ${CB}Выход${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
         local choice=""
         while true; do
-            echo -ne "  ${CB}Выбор${CR} [1-5]: "
+            echo -ne "  ${CB}Выбор${CR} [1-6]: "
             read -r choice
-            case "$choice" in 1|2|3|4|5) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 5" ;; esac
+            case "$choice" in 1|2|3|4|5|6) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 6" ;; esac
         done
 
         case "$choice" in
@@ -153,7 +247,7 @@ main() {
                 if [[ -n "$cfg" ]]; then
                     nano "$cfg"
                     echo ""
-                    echo -e "  ${CC}●${CR} Конфиг сохранён. Перезапустить telemt? [y/N]: "
+                    echo -ne "  ${CC}●${CR} Конфиг сохранён. Перезапустить telemt? [y/N]: "
                     local yn; read -r yn
                     if [[ "$yn" =~ ^[Yy]$ ]]; then
                         systemctl restart telemt 2>/dev/null
@@ -177,6 +271,9 @@ main() {
                 echo -e "  ${CY}⚠${CR} telemt остановлен"
                 ;;
             5)
+                _run_cleaner
+                ;;
+            6)
                 echo -e "  ${CD}До свидания!${CR}"
                 exit 0
                 ;;
