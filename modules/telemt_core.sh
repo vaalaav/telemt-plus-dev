@@ -272,6 +272,13 @@ telemt_download() {
     rollback_push "rm -f '${TELEMT_BIN}'"
     msg_ok "telemt установлен в ${TELEMT_BIN}"
 
+    # Установить CLI-утилиту mytelemtinfo
+    local info_src="${MODULES_DIR}/mytelemtinfo"
+    if [[ -f "$info_src" ]]; then
+        install -m 0755 "$info_src" /usr/local/bin/mytelemtinfo
+        msg_ok "CLI-утилита: ${C_BOLD}mytelemtinfo${C_RESET} доступна в терминале"
+    fi
+
     # Проверка
     if "${TELEMT_BIN}" --version >> "$LOG_FILE" 2>&1; then
         local ver

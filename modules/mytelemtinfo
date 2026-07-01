@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════
+#  mytelemtinfo — CLI-утилита управления telemt
+#  Устанавливается автоматически в /usr/local/bin/
+# ═══════════════════════════════════════════════════════════════════
+
+CR='\e[0m' CB='\e[1m' CD='\e[2m'
+CG='\e[1;32m' CY='\e[1;33m' CC='\e[1;36m' CW='\e[1;37m' CM='\e[1;35m' CRED='\e[1;31m'
+
+_detect_config() {
+    for f in /etc/telemt/telemt.toml /etc/telemt/config.toml /opt/telemt/telemt.toml; do
+        [[ -f "$f" ]] && echo "$f" && return
+    done
+}
+
+_print_status() {
+    local cfg; cfg=$(_detect_config)
+
+    echo ""
+    echo -e "  ${CC}▐${CD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CR}"
+    echo -e "  ${CC}▐${CR}  ${CB}${CW}Telemt — статус системы${CR}"
+    echo -e "  ${CC}▐${CR}"
+
+    # telemt сервис
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        local ver; ver=$(/bin/telemt --version 2>/dev/null | awk '{print $2}')
+        echo -e "  ${CC}▐${CR}  telemt:    ${CG}● Активен${CR} ${CD}(${ver:-?})${CR}"
+    elif [[ -f /bin/telemt ]]; then
+        echo -e "  ${CC}▐${CR}  telemt:    ${CRED}● Остановлен${CR}"
+    else
+        echo -e "  ${CC}▐${CR}  telemt:    ${CD}Не установлен${CR}"
+    fi
+
+    # Nginx
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        echo -e "  ${CC}▐${CR}  Nginx:     ${CG}● Активен${CR}"
+    else
+        echo -e "  ${CC}▐${CR}  Nginx:     ${CD}Не установлен${CR}"
+    fi
+
+    # Конфиг
+    if [[ -n "$cfg" ]]; then
+        echo -e "  ${CC}▐${CR}  Конфиг:    ${CW}${cfg}${CR}"
+
+        # Домен
+        local host; host=$(grep -E '^public_host' "$cfg" 2>/dev/null | head -1 | awk -F'"' '{print $2}')
+        echo -e "  ${CC}▐${CR}  Домен:     ${CW}${host:-не привязан}${CR}"
+
+        # Порт
+        local port; port=$(grep -E '^port[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' ')
+        echo -e "  ${CC}▐${CR}  Порт:      ${CW}${port:-?}${CR}"
+
+        # Режим
+        if grep -q '^mask *= *true' "$cfg" 2>/dev/null; then
+            echo -e "  ${CC}▐${CR}  Режим:     ${CC}Selfmask${CR}"
+        else
+            echo -e "  ${CC}▐${CR}  Режим:     ${CG}Стандартный${CR}"
+        fi
+
+        # SYN-fix
+        if grep -q 'synlimit' "$cfg" 2>/dev/null; then
+            echo -e "  ${CC}▐${CR}  SYN-fix:   ${CG}● Активен${CR}"
+        else
+            echo -e "  ${CC}▐${CR}  SYN-fix:   ${CD}Не применён${CR}"
+        fi
+
+        # Прокси-ссылка
+        local link=""
+        if [[ -f /opt/telemt/proxy_links.txt ]]; then
+            link=$(grep -E '^tg://' /opt/telemt/proxy_links.txt 2>/dev/null | head -1)
+        fi
+        if [[ -n "$link" ]]; then
+            echo -e "  ${CC}▐${CR}"
+            echo -e "  ${CC}▐${CR}  ${CD}── Прокси ──${CR}"
+            echo -e "  ${CC}▐${CR}  ${CC}${link}${CR}"
+        fi
+    else
+        echo -e "  ${CC}▐${CR}  Конфиг:    ${CRED}не найден${CR}"
+    fi
+
+    echo -e "  ${CC}▐${CD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CR}"
+    echo ""
+}
+
+_apply_synfix() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    if grep -q 'synlimit' "$cfg" 2>/dev/null; then
+        echo -e "  ${CC}●${CR} SYN-fix уже был применён ранее"
+        return 0
+    fi
+
+    # Дописать блок в конец конфига
+    cat >> "$cfg" << 'SYNEOF'
+
+# SYN-fix — защита от флуда (добавлено mytelemtinfo)
+[[server.listeners]]
+ip = "0.0.0.0"
+synlimit = "iptables"
+synlimit_ios_hitcount = 15
+synlimit_ios_seconds  = 1
+synlimit_ios_burst    = 30
+synlimit_hitcount = 54
+synlimit_seconds  = 60
+synlimit_burst    = 1
+SYNEOF
+
+    systemctl restart telemt 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} SYN-fix успешно применён и активирован"
+    else
+        echo -e "  ${CY}⚠${CR} SYN-fix записан, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  Главный цикл
+# ══════════════════════════════════════════════════════════════════
+main() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "  ${CRED}✘${CR} Запустите от root: ${CB}sudo mytelemtinfo${CR}"
+        exit 1
+    fi
+
+    while true; do
+        clear
+        _print_status
+
+        echo -e "  ${CB}${CW}Управление Telemt${CR}"
+        echo -e "  ${CD}────────────────────────────────────${CR}"
+        echo -e "    ${CB}[1]${CR} ${CB}Редактирование конфигурации${CR}"
+        echo -e "    ${CB}[2]${CR} ${CB}Применить SYN-fix${CR}"
+        echo -e "    ${CB}[3]${CR} ${CB}Перезапустить сервис${CR}"
+        echo -e "    ${CB}[4]${CR} ${CB}Остановить сервис${CR}"
+        echo -e "    ${CB}[5]${CR} ${CB}Выход${CR}"
+        echo -e "  ${CD}────────────────────────────────────${CR}"
+
+        local choice=""
+        while true; do
+            echo -ne "  ${CB}Выбор${CR} [1-5]: "
+            read -r choice
+            case "$choice" in 1|2|3|4|5) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 5" ;; esac
+        done
+
+        case "$choice" in
+            1)
+                local cfg; cfg=$(_detect_config)
+                if [[ -n "$cfg" ]]; then
+                    nano "$cfg"
+                    echo ""
+                    echo -e "  ${CC}●${CR} Конфиг сохранён. Перезапустить telemt? [y/N]: "
+                    local yn; read -r yn
+                    if [[ "$yn" =~ ^[Yy]$ ]]; then
+                        systemctl restart telemt 2>/dev/null
+                        sleep 2
+                        systemctl is-active --quiet telemt && echo -e "  ${CG}✔${CR} telemt перезапущен" || echo -e "  ${CRED}✘${CR} Ошибка запуска"
+                    fi
+                else
+                    echo -e "  ${CRED}✘${CR} Конфиг не найден"
+                fi
+                ;;
+            2)
+                _apply_synfix
+                ;;
+            3)
+                systemctl restart telemt 2>/dev/null
+                sleep 2
+                systemctl is-active --quiet telemt && echo -e "  ${CG}✔${CR} telemt перезапущен" || echo -e "  ${CRED}✘${CR} Ошибка запуска"
+                ;;
+            4)
+                systemctl stop telemt 2>/dev/null
+                echo -e "  ${CY}⚠${CR} telemt остановлен"
+                ;;
+            5)
+                echo -e "  ${CD}До свидания!${CR}"
+                exit 0
+                ;;
+        esac
+
+        echo ""
+        echo -ne "  ${CD}Нажмите Enter...${CR}"
+        read -r
+    done
+}
+
+main "$@"
