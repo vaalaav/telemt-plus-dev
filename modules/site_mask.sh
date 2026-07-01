@@ -45,12 +45,61 @@ sitemask_collect_params() {
         if [[ "$resolved_ip" == "$server_ip" ]]; then
             msg_ok "DNS подтверждён: ${MASK_DOMAIN} → ${resolved_ip}"
         else
-            msg_warn "DNS: ${MASK_DOMAIN} → ${resolved_ip} (ожидался ${server_ip})"
-            msg_warn "Let's Encrypt НЕ СМОЖЕТ выдать сертификат, если DNS не совпадает!"
-            if ! confirm_yn "Продолжить несмотря на несовпадение?" "n"; then return 1; fi
+            while true; do
+                msg_warn "DNS: ${MASK_DOMAIN} → ${resolved_ip} (ожидался ${server_ip})"
+                msg_warn "Let's Encrypt НЕ СМОЖЕТ выдать сертификат, если DNS не совпадает!"
+                echo -e "    ${C_BOLD}[1]${C_RESET} Повторить проверку DNS"
+                echo -e "    ${C_BOLD}[2]${C_RESET} Отменить установку"
+                echo -e "    ${C_BOLD}[3]${C_RESET} Продолжить несмотря на несовпадение"
+                local dns_choice=""
+                while true; do
+                    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
+                    read -r dns_choice </dev/tty || true
+                    case "$dns_choice" in 1|2|3) break ;; *) msg_warn "Введите 1, 2 или 3" ;; esac
+                done
+                if [[ "$dns_choice" == "2" ]]; then return 1; fi
+                if [[ "$dns_choice" == "3" ]]; then break; fi
+                # Повтор
+                msg_info "Повторная проверка DNS..."
+                resolved_ip=""
+                if command -v dig &>/dev/null; then
+                    resolved_ip=$(dig +short "$MASK_DOMAIN" A 2>/dev/null | tail -1)
+                elif command -v nslookup &>/dev/null; then
+                    resolved_ip=$(nslookup "$MASK_DOMAIN" 2>/dev/null | awk '/^Address:/{a=$2} END{print a}')
+                fi
+                if [[ "$resolved_ip" == "$server_ip" ]]; then
+                    msg_ok "DNS подтверждён: ${MASK_DOMAIN} → ${resolved_ip}"
+                    break
+                fi
+                [[ -z "$resolved_ip" ]] && resolved_ip="(не резолвится)"
+            done
         fi
     else
-        msg_warn "Не удалось проверить DNS — убедитесь, что A-запись настроена"
+        while true; do
+            msg_warn "Не удалось проверить DNS — убедитесь, что A-запись настроена"
+            echo -e "    ${C_BOLD}[1]${C_RESET} Повторить проверку DNS"
+            echo -e "    ${C_BOLD}[2]${C_RESET} Отменить установку"
+            echo -e "    ${C_BOLD}[3]${C_RESET} Продолжить (A-запись уже настроена)"
+            local dns_choice=""
+            while true; do
+                echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2/3]: "
+                read -r dns_choice </dev/tty || true
+                case "$dns_choice" in 1|2|3) break ;; *) msg_warn "Введите 1, 2 или 3" ;; esac
+            done
+            if [[ "$dns_choice" == "2" ]]; then return 1; fi
+            if [[ "$dns_choice" == "3" ]]; then break; fi
+            msg_info "Повторная проверка DNS..."
+            resolved_ip=""
+            if command -v dig &>/dev/null; then
+                resolved_ip=$(dig +short "$MASK_DOMAIN" A 2>/dev/null | tail -1)
+            elif command -v nslookup &>/dev/null; then
+                resolved_ip=$(nslookup "$MASK_DOMAIN" 2>/dev/null | awk '/^Address:/{a=$2} END{print a}')
+            fi
+            if [[ -n "$resolved_ip" && "$resolved_ip" == "$server_ip" ]]; then
+                msg_ok "DNS подтверждён: ${MASK_DOMAIN} → ${resolved_ip}"
+                break
+            fi
+        done
     fi
 
     # ── Выбор шаблона сайта ───────────────────────────────────────
