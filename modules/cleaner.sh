@@ -23,6 +23,10 @@ _has_meko_fixes() {
     [[ -d /etc/systemd/system/telemt.service.d ]]
 }
 
+_has_xray() {
+    [[ -f /usr/local/bin/xray ]] || systemctl cat xray.service &>/dev/null 2>&1
+}
+
 _has_nginx() {
     command -v nginx &>/dev/null && systemctl is-active --quiet nginx 2>/dev/null
 }
@@ -266,6 +270,12 @@ cleaner_run() {
         found_meko=true; ((found_count++))
     fi
 
+    local found_xray=false
+    if _has_xray; then
+        echo -e "    ${C_GREEN}${CHECK}${C_RESET} ${C_BOLD}Xray tunnel${C_RESET} — upstream туннель к Telegram DC"
+        found_xray=true; ((found_count++))
+    fi
+
     if [[ $found_count -eq 0 ]]; then
         echo -e "    ${C_DIM}Ничего не найдено — система чистая${C_RESET}"
         echo ""
@@ -301,6 +311,28 @@ cleaner_run() {
             _clean_meko_fixes
         else
             msg_info "Фиксы MEKO — оставлены"
+        fi
+        echo ""
+    fi
+
+    if [[ "$found_xray" == "true" ]]; then
+        if confirm_yn "  ${C_BOLD}Удалить Xray Upstream Tunnel?${C_RESET}" "n"; then
+            # Используем встроенную функцию если модуль загружен, иначе inline
+            if declare -F xray_upstream_remove &>/dev/null; then
+                xray_upstream_remove
+            else
+                systemctl stop xray 2>/dev/null; systemctl disable xray 2>/dev/null
+                rm -f /etc/systemd/system/xray.service /usr/local/bin/xray
+                rm -rf /etc/xray /var/log/xray
+                systemctl daemon-reload
+                for f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
+                    [[ -f "$f" ]] && sed -i '/^socks5_proxy/d' "$f" 2>/dev/null
+                done
+                systemctl is-active --quiet telemt 2>/dev/null && systemctl restart telemt 2>/dev/null
+                msg_ok "Xray Upstream удалён"
+            fi
+        else
+            msg_info "Xray — оставлен"
         fi
         echo ""
     fi

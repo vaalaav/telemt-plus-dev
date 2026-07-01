@@ -140,6 +140,15 @@ print_status_panel() {
     fi
     echo -e "  ${C_CYAN}▐${C_RESET}  MEKO фиксы:    ${meko_status}"
 
+    # Xray туннель
+    local xray_status="${C_DIM}Не установлен${C_RESET}"
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        xray_status="${C_GREEN}● Активен${C_RESET}"
+    elif [[ -f /usr/local/bin/xray ]]; then
+        xray_status="${C_RED}● Остановлен${C_RESET}"
+    fi
+    echo -e "  ${C_CYAN}▐${C_RESET}  Xray туннель:  ${xray_status}"
+
     # Прокси-ссылка (если telemt установлен)
     local proxy_link=""
     if [[ -f /opt/telemt/proxy_links.txt ]]; then
@@ -193,9 +202,10 @@ print_menu() {
     echo -e "    ${C_CYAN}${C_BOLD}[3]${C_RESET} ${C_BOLD}Привязка домена к прокси${C_RESET}"
     echo -e "    ${C_YELLOW}${C_BOLD}[4]${C_RESET} ${C_BOLD}Применение фиксов оптимизации MEKO${C_RESET}"
     echo -e "    ${C_MAGENTA}${C_BOLD}[5]${C_RESET} ${C_BOLD}Установка панели управления Telemt${C_RESET}"
+    echo -e "    ${C_WHITE}${C_BOLD}[6]${C_RESET} ${C_BOLD}Xray Upstream Tunnel${C_RESET}"
     echo ""
     echo -e "  ${C_BOLD}${C_WHITE}[ Система ]${C_RESET}"
-    echo -e "    ${C_RED}${C_BOLD}[6]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
+    echo -e "    ${C_RED}${C_BOLD}[7]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
     echo ""
     echo -e "  ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
@@ -274,6 +284,12 @@ do_panel_install() {
     panel_install
 }
 
+do_xray_upstream() {
+    _load_module "xray_upstream" || return 1
+    init_logging
+    xray_upstream_setup
+}
+
 do_cleanup() {
     _load_module "cleaner" || return 1
     init_logging
@@ -293,7 +309,7 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-6]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-7]: "
         local choice=""
         read -r choice </dev/tty || true
 
@@ -303,7 +319,8 @@ main() {
             3) do_bind_domain      ;;
             4) do_meko_fixes       ;;
             5) do_panel_install    ;;
-            6) do_cleanup          ;;
+            6) do_xray_upstream    ;;
+            7) do_cleanup          ;;
             0)
                 echo ""
                 msg_info "До свидания!"

@@ -64,6 +64,13 @@ _print_status() {
             echo -e "  ${CC}▐${CR}  SYN-fix:   ${CD}Не применён${CR}"
         fi
 
+        # Xray туннель
+        if systemctl is-active --quiet xray 2>/dev/null; then
+            echo -e "  ${CC}▐${CR}  Xray:      ${CG}● Активен${CR}"
+        elif [[ -f /usr/local/bin/xray ]]; then
+            echo -e "  ${CC}▐${CR}  Xray:      ${CRED}● Остановлен${CR}"
+        fi
+
         # Прокси-ссылка
         local link=""
         if [[ -f /opt/telemt/proxy_links.txt ]]; then
