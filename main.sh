@@ -183,24 +183,22 @@ print_status_panel() {
 # ── Главное меню ──────────────────────────────────────────────────
 print_menu() {
     echo -e "  ${C_BOLD}${C_WHITE}Главное меню${C_RESET}"
-    echo -e "  ${C_DIM}────────────────────────────────────────────${C_RESET}"
-    echo -e "    ${C_GREEN}${C_BOLD}[1]${C_RESET} ${C_BOLD}Установка ядра telemt${C_RESET}"
-    echo -e "        ${C_DIM}Выбор версии, порт, домен, прокси-ссылки${C_RESET}"
+    echo -e "  ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     echo ""
+    echo -e "  ${C_BOLD}${C_WHITE}[ Вариант установки ]${C_RESET}"
+    echo -e "    ${C_GREEN}${C_BOLD}[1]${C_RESET} ${C_BOLD}Базовый telemt${C_RESET}"
     echo -e "    ${C_BLUE}${C_BOLD}[2]${C_RESET} ${C_BOLD}Маскировка под веб-сайт (Selfmask)${C_RESET}"
-    echo -e "        ${C_DIM}Nginx + SSL + шаблон сайта + telemt mask${C_RESET}"
     echo ""
-    echo -e "    ${C_YELLOW}${C_BOLD}[3]${C_RESET} ${C_BOLD}Фиксы оптимизации MEKO${C_RESET}"
-    echo -e "        ${C_DIM}SYN FIX, BBR, sysctl, TCP-тюнинг${C_RESET}"
+    echo -e "  ${C_BOLD}${C_WHITE}[ Дополнительные опции ]${C_RESET}"
+    echo -e "    ${C_CYAN}${C_BOLD}[3]${C_RESET} ${C_BOLD}Привязка домена к прокси${C_RESET}"
+    echo -e "    ${C_YELLOW}${C_BOLD}[4]${C_RESET} ${C_BOLD}Применение фиксов оптимизации MEKO${C_RESET}"
+    echo -e "    ${C_MAGENTA}${C_BOLD}[5]${C_RESET} ${C_BOLD}Установка панели управления Telemt${C_RESET}"
     echo ""
-    echo -e "    ${C_MAGENTA}${C_BOLD}[4]${C_RESET} ${C_BOLD}Панель управления telemt${C_RESET}"
-    echo -e "        ${C_DIM}Веб-интерфейс для управления прокси${C_RESET}"
-    echo ""
-    echo -e "    ${C_RED}${C_BOLD}[5]${C_RESET} ${C_BOLD}Очистка системы${C_RESET}"
-    echo -e "        ${C_DIM}Пошаговый аудит и удаление компонентов${C_RESET}"
-    echo ""
+    echo -e "  ${C_BOLD}${C_WHITE}[ Система ]${C_RESET}"
+    echo -e "    ${C_RED}${C_BOLD}[6]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
-    echo -e "  ${C_DIM}────────────────────────────────────────────${C_RESET}"
+    echo ""
+    echo -e "  ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
 }
 
 # ── Обработчики пунктов меню (прямые вызовы модулей) ──────────────
@@ -209,9 +207,14 @@ do_telemt_install() {
     _load_module "telemt_core" || return 1
     init_logging
     rollback_clear
-    telemt_install     || { msg_err "Ошибка установки telemt"; return 1; }
-    telemt_bind_domain || true
+    telemt_install || { msg_err "Ошибка установки telemt"; return 1; }
     msg_ok "Ядро telemt установлено"
+}
+
+do_bind_domain() {
+    _load_module "telemt_core" || return 1
+    init_logging
+    telemt_bind_domain || true
 }
 
 do_selfmask_install() {
@@ -290,16 +293,17 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-5]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-6]: "
         local choice=""
         read -r choice </dev/tty || true
 
         case "$choice" in
-            1) do_telemt_install  ;;
+            1) do_telemt_install   ;;
             2) do_selfmask_install ;;
-            3) do_meko_fixes      ;;
-            4) do_panel_install   ;;
-            5) do_cleanup         ;;
+            3) do_bind_domain      ;;
+            4) do_meko_fixes       ;;
+            5) do_panel_install    ;;
+            6) do_cleanup          ;;
             0)
                 echo ""
                 msg_info "До свидания!"
