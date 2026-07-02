@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - 🌐 **Привязка домена** — автоматическая проверка DNS и подстановка домена в прокси-ссылки
 - 🛡️ **Фиксы оптимизации MEKO** — SYN FIX, BBR, TCP-тюнинг, обход DPI-блокировок
 - 📊 **Панель управления** — веб-интерфейс для мониторинга и управления прокси
-- 🔗 **Xray Upstream Tunnel** — маршрутизация трафика к Telegram через внешний VPN-туннель (VLESS, VMess, Shadowsocks)
+- 🔗 **Xray Upstream Tunnel** — маршрутизация трафика к Telegram через внешний VPN-туннель
 - 🧹 **Интеллектуальная очистка** — аудит установленных компонентов с пошаговым удалением
 - 🖥️ **CLI-утилита `mytelemtinfo`** — быстрое управление прокси из терминала
 
@@ -73,17 +73,8 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 
 ### 🔗 Xray Upstream Tunnel
 
-Весь исходящий трафик от telemt к серверам Telegram маршрутизируется через внешний VPN-туннель. Достаточно вставить ключ подключения — скрипт автоматически настроит всю цепочку:
-
-```
-Telegram клиент → telemt → Xray SOCKS5 → внешний сервер → Telegram DC
-```
-
-Поддерживаемые протоколы:
-- **VLESS** — `vless://...` (включая Reality и gRPC)
-- **VMess** — `vmess://...`
-- **Shadowsocks** — `ss://...`
-
+Весь исходящий трафик от telemt к серверам Telegram маршрутизируется через внешний VPN-туннель.
+Достаточно вставить ключ подключения — скрипт автоматически настроит всю цепочку.
 Маршрутизация настроена точечно: через туннель идёт только трафик к подсетям Telegram (9 IPv4 + 5 IPv6 CIDR), остальной — напрямую.
 
 ### 🛡️ Оптимизация MEKO
@@ -132,7 +123,7 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - 🌐 **Domain binding** — automatic DNS verification and domain substitution in proxy links
 - 🛡️ **MEKO optimization fixes** — SYN FIX, BBR, TCP tuning, DPI bypass
 - 📊 **Control panel** — web interface for proxy monitoring and management
-- 🔗 **Xray Upstream Tunnel** — route Telegram traffic through an external VPN tunnel (VLESS, VMess, Shadowsocks)
+- 🔗 **Xray Upstream Tunnel** — route Telegram traffic through an external VPN tunnel
 - 🧹 **Smart cleanup** — component audit with step-by-step removal
 - 🖥️ **CLI utility `mytelemtinfo`** — quick proxy management from terminal
 
@@ -168,17 +159,8 @@ Built-in site templates:
 
 ### 🔗 Xray Upstream Tunnel
 
-All outgoing traffic from telemt to Telegram servers is routed through an external VPN tunnel. Simply paste a connection key — the script will automatically configure the entire chain:
-
-```
-Telegram client → telemt → Xray SOCKS5 → external server → Telegram DC
-```
-
-Supported protocols:
-- **VLESS** — `vless://...` (including Reality and gRPC)
-- **VMess** — `vmess://...`
-- **Shadowsocks** — `ss://...`
-
+All outgoing traffic from telemt to Telegram servers is routed through an external VPN tunnel.
+Simply paste a connection key — the script will automatically configure the entire chain.
 Routing is precise: only Telegram subnet traffic (9 IPv4 + 5 IPv6 CIDRs) goes through the tunnel, everything else goes direct.
 
 ### 🛡️ MEKO Optimization
