@@ -214,6 +214,13 @@ OUTJSON
 _xray_install_binary() {
     msg_step "Установка Xray"
 
+    # Зависимость: unzip (может отсутствовать на некоторых VPS)
+    if ! command -v unzip &>/dev/null; then
+        run_with_spinner "Установка unzip" apt-get install -y -qq unzip || {
+            msg_err "Не удалось установить unzip"; return 1
+        }
+    fi
+
     if [[ -f "$XRAY_BIN" ]]; then
         local ver; ver=$("$XRAY_BIN" version 2>/dev/null | head -1 | awk '{print $2}')
         msg_ok "Xray уже установлен (${ver})"
