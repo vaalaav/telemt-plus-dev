@@ -11,7 +11,7 @@ XRAY_CONFIG="${XRAY_CONFIG_DIR}/config.json"
 XRAY_LOG_DIR="/var/log/xray"
 XRAY_SERVICE="xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/${XRAY_SERVICE}.service"
-XRAY_SOCKS_PORT="1080"
+XRAY_SOCKS_PORT="40000"
 XRAY_LINK=""
 
 # Подсети Telegram DC
