@@ -456,11 +456,46 @@ SVCEOF
     fi
 }
 
+# ── Подтянуть секрет/домен/порт из реального конфига, если переменные
+#    сессии пусты (актуально при отдельном запуске "Привязка домена"
+#    без предшествующей telemt_collect_params в этом же процессе) ──
+_telemt_load_state_from_config() {
+    local cfg="${TELEMT_CONFIG:-/etc/telemt/telemt.toml}"
+    [[ -f "$cfg" ]] || return 1
+
+    if [[ -z "${TELEMT_SECRET:-}" ]]; then
+        TELEMT_SECRET=$(grep -E '^[[:space:]]*hello[[:space:]]*=' "$cfg" | head -1 | sed -E 's/^[^=]+=[[:space:]]*"([^"]*)".*/\1/')
+    fi
+    if [[ -z "${TELEMT_TLS_DOMAIN:-}" ]]; then
+        TELEMT_TLS_DOMAIN=$(grep -E '^[[:space:]]*tls_domain[[:space:]]*=' "$cfg" | head -1 | sed -E 's/^[^=]+=[[:space:]]*"([^"]*)".*/\1/')
+    fi
+    if [[ -z "${TELEMT_PORT:-}" ]]; then
+        TELEMT_PORT=$(grep -E '^[[:space:]]*port[[:space:]]*=' "$cfg" | head -1 | awk -F'=' '{print $2}' | tr -d ' ')
+    fi
+    if [[ -z "${TELEMT_PUBLIC_HOST:-}" ]]; then
+        TELEMT_PUBLIC_HOST=$(grep -E '^[[:space:]]*public_host[[:space:]]*=' "$cfg" | head -1 | sed -E 's/^[^=]+=[[:space:]]*"([^"]*)".*/\1/')
+    fi
+    return 0
+}
+
 # ══════════════════════════════════════════════════════════════════
 #  Шаг 6: Генерация и вывод прокси-ссылок
 # ══════════════════════════════════════════════════════════════════
 telemt_print_links() {
     msg_step "Прокси-ссылки"
+
+    # Восполнить недостающие переменные из конфига (если функция вызвана
+    # отдельно от telemt_collect_params — напр. из telemt_bind_domain
+    # в новом запуске скрипта)
+    _telemt_load_state_from_config
+
+    if [[ -z "${TELEMT_SECRET:-}" ]]; then
+        msg_err "Не удалось определить секрет из ${TELEMT_CONFIG:-/etc/telemt/telemt.toml} — ссылка не будет сгенерирована"
+        return 1
+    fi
+    if [[ -z "${TELEMT_TLS_DOMAIN:-}" ]]; then
+        msg_warn "tls_domain не найден в конфиге — используется заглушка (проверьте конфиг вручную)"
+    fi
 
     local ip host domain_hex full_secret link
     ip=$(_get_public_ipv4)
