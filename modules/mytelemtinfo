@@ -219,6 +219,146 @@ SYNEOF
 }
 
 # ══════════════════════════════════════════════════════════════════
+#  Xray Upstream Tunnel — управление
+# ══════════════════════════════════════════════════════════════════
+_xray_installed() {
+    [[ -f /usr/local/bin/xray ]] || systemctl cat xray.service &>/dev/null 2>&1
+}
+
+# Подгрузить утилиты и логику xray_upstream.sh из установщика
+# (нужна для парсинга ссылок vless/vmess/ss и генерации config.json)
+_xray_load_module() {
+    local installer_dir="/opt/telemt-installer"
+    if [[ -f "${installer_dir}/modules/utils.sh" && -f "${installer_dir}/modules/xray_upstream.sh" ]]; then
+        source "${installer_dir}/modules/utils.sh"
+        source "${installer_dir}/modules/xray_upstream.sh"
+        return 0
+    fi
+    return 1
+}
+
+_xray_stop() {
+    if ! _xray_installed; then
+        echo -e "  ${CD}Xray не установлен${CR}"
+        return
+    fi
+    systemctl stop xray 2>/dev/null
+    echo -e "  ${CY}⚠${CR} Xray-туннель остановлен"
+}
+
+_xray_restart() {
+    if ! _xray_installed; then
+        echo -e "  ${CD}Xray не установлен${CR}"
+        return
+    fi
+    systemctl restart xray 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} Xray-туннель перезапущен"
+    else
+        echo -e "  ${CRED}✘${CR} Ошибка запуска — проверьте: journalctl -u xray -n 20"
+    fi
+}
+
+_xray_change_key() {
+    if ! _xray_installed; then
+        echo -e "  ${CD}Xray не установлен${CR}"
+        return
+    fi
+
+    if ! _xray_load_module; then
+        echo -e "  ${CRED}✘${CR} Модули установщика не найдены (/opt/telemt-installer)"
+        echo -e "  ${CD}Переустановите ключ через полный установщик: пункт [6] Xray Upstream Tunnel${CR}"
+        return 1
+    fi
+
+    echo ""
+    echo -ne "  ${CB}Новый ключ подключения (vless://, vmess://, ss://):${CR} "
+    local new_link
+    read -r new_link
+
+    if [[ ! "$new_link" =~ ^(vless|vmess|ss):// ]]; then
+        echo -e "  ${CRED}✘${CR} Неверный формат ссылки"
+        return 1
+    fi
+
+    local proto="${new_link%%://*}"
+    local outbound_json=""
+    case "$proto" in
+        vless) outbound_json=$(_xray_parse_vless "$new_link") ;;
+        vmess) outbound_json=$(_xray_parse_vmess "$new_link") ;;
+        ss)    outbound_json=$(_xray_parse_ss "$new_link")    ;;
+    esac
+
+    if [[ -z "$outbound_json" ]] || ! echo "$outbound_json" | jq -e . &>/dev/null; then
+        echo -e "  ${CRED}✘${CR} Ошибка парсинга ссылки"
+        return 1
+    fi
+
+    mkdir -p /etc/xray/backups
+    [[ -f "$XRAY_CONFIG" ]] && cp "$XRAY_CONFIG" "/etc/xray/backups/config.json.$(date +%s)" 2>/dev/null
+
+    _xray_generate_config "$outbound_json" || {
+        echo -e "  ${CRED}✘${CR} Не удалось сгенерировать конфиг"
+        return 1
+    }
+
+    systemctl restart xray 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} Ключ обновлён, Xray перезапущен"
+        _xray_test_tunnel 2>/dev/null || true
+    else
+        echo -e "  ${CRED}✘${CR} Xray не запустился с новым ключом — проверьте: journalctl -u xray -n 20"
+    fi
+}
+
+_xray_menu() {
+    while true; do
+        clear
+        echo ""
+        echo -e "  ${CC}▐${CD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CR}"
+        echo -e "  ${CC}▐${CR}  ${CB}${CW}Xray Upstream Tunnel${CR}"
+        echo -e "  ${CC}▐${CR}"
+        if systemctl is-active --quiet xray 2>/dev/null; then
+            echo -e "  ${CC}▐${CR}  Статус:    ${CG}● Активен${CR}"
+        elif [[ -f /usr/local/bin/xray ]]; then
+            echo -e "  ${CC}▐${CR}  Статус:    ${CRED}● Остановлен${CR}"
+        else
+            echo -e "  ${CC}▐${CR}  Статус:    ${CD}Не установлен${CR}"
+        fi
+        echo -e "  ${CC}▐${CD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${CR}"
+        echo ""
+
+        echo -e "  ${CB}${CW}Управление Xray${CR}"
+        echo -e "  ${CD}────────────────────────────────────${CR}"
+        echo -e "    ${CB}[1]${CR} ${CB}Остановить туннель${CR}"
+        echo -e "    ${CB}[2]${CR} ${CB}Перезапустить туннель${CR}"
+        echo -e "    ${CB}[3]${CR} ${CB}Изменить ключ подключения${CR}"
+        echo -e "    ${CB}[4]${CR} ${CB}Назад${CR}"
+        echo -e "  ${CD}────────────────────────────────────${CR}"
+
+        local xchoice=""
+        while true; do
+            echo -ne "  ${CB}Выбор${CR} [1-4]: "
+            read -r xchoice
+            case "$xchoice" in 1|2|3|4) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 4" ;; esac
+        done
+
+        case "$xchoice" in
+            1) _xray_stop ;;
+            2) _xray_restart ;;
+            3) _xray_change_key ;;
+            4) return ;;
+        esac
+
+        echo ""
+        echo -ne "  ${CD}Нажмите Enter...${CR}"
+        read -r
+    done
+}
+
+# ══════════════════════════════════════════════════════════════════
 #  Главный цикл
 # ══════════════════════════════════════════════════════════════════
 main() {
@@ -237,15 +377,16 @@ main() {
         echo -e "    ${CB}[2]${CR} ${CB}Применить SYN-fix${CR}"
         echo -e "    ${CB}[3]${CR} ${CB}Перезапустить сервис${CR}"
         echo -e "    ${CB}[4]${CR} ${CB}Остановить сервис${CR}"
-        echo -e "    ${CB}[5]${CR} ${CB}Пошаговая очистка системы${CR}"
-        echo -e "    ${CB}[6]${CR} ${CB}Выход${CR}"
+        echo -e "    ${CB}[5]${CR} ${CB}Xray Upstream Tunnel${CR}"
+        echo -e "    ${CB}[6]${CR} ${CB}Пошаговая очистка системы${CR}"
+        echo -e "    ${CB}[7]${CR} ${CB}Выход${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
         local choice=""
         while true; do
-            echo -ne "  ${CB}Выбор${CR} [1-6]: "
+            echo -ne "  ${CB}Выбор${CR} [1-7]: "
             read -r choice
-            case "$choice" in 1|2|3|4|5|6) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 6" ;; esac
+            case "$choice" in 1|2|3|4|5|6|7) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 7" ;; esac
         done
 
         case "$choice" in
@@ -278,9 +419,12 @@ main() {
                 echo -e "  ${CY}⚠${CR} telemt остановлен"
                 ;;
             5)
-                _run_cleaner
+                _xray_menu
                 ;;
             6)
+                _run_cleaner
+                ;;
+            7)
                 echo -e "  ${CD}До свидания!${CR}"
                 exit 0
                 ;;
