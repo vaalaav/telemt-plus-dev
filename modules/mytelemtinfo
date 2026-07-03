@@ -194,10 +194,14 @@ _apply_synfix() {
         return 0
     fi
 
-    # Дописать блок в конец конфига
+    # Бэкап перед изменением
+    mkdir -p /opt/telemt/backups 2>/dev/null
+    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-synfix.$(date +%s)" 2>/dev/null
+
+    # Дописать блок в конец конфига (маркеры нужны для точного отката _disable_synfix)
     cat >> "$cfg" << 'SYNEOF'
 
-# SYN-fix — защита от флуда (добавлено mytelemtinfo)
+# >>> SYN-fix (mytelemtinfo) — не редактировать вручную, блок управляется автоматически
 [[server.listeners]]
 ip = "0.0.0.0"
 synlimit = "iptables"
@@ -207,6 +211,7 @@ synlimit_ios_burst    = 30
 synlimit_hitcount = 54
 synlimit_seconds  = 60
 synlimit_burst    = 1
+# <<< SYN-fix (mytelemtinfo)
 SYNEOF
 
     systemctl restart telemt 2>/dev/null
@@ -215,6 +220,67 @@ SYNEOF
         echo -e "  ${CG}✔${CR} SYN-fix успешно применён и активирован"
     else
         echo -e "  ${CY}⚠${CR} SYN-fix записан, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+_disable_synfix() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    if ! grep -q 'synlimit' "$cfg" 2>/dev/null; then
+        echo -e "  ${CD}SYN-fix не применён — нечего отключать${CR}"
+        return 0
+    fi
+
+    mkdir -p /opt/telemt/backups 2>/dev/null
+    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-disable-synfix.$(date +%s)" 2>/dev/null
+
+    if grep -q '# >>> SYN-fix (mytelemtinfo)' "$cfg" 2>/dev/null; then
+        # Точное удаление блока по маркерам
+        sed -i '/^# >>> SYN-fix (mytelemtinfo)/,/^# <<< SYN-fix (mytelemtinfo)/d' "$cfg"
+    else
+        # Старый формат без маркеров (записан предыдущей версией скрипта) — удалить по известным полям
+        sed -i '/^# SYN-fix — защита от флуда/,/^synlimit_burst/d' "$cfg"
+    fi
+
+    systemctl restart telemt 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} SYN-fix отключён, telemt перезапущен"
+    else
+        echo -e "  ${CY}⚠${CR} SYN-fix удалён из конфига, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+# Переключатель: показывает текущее состояние и предлагает применить/отключить
+_synfix_menu() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    if grep -q 'synlimit' "$cfg" 2>/dev/null; then
+        echo -e "  ${CC}●${CR} SYN-fix сейчас: ${CG}применён${CR}"
+        echo -ne "  ${CB}Отключить SYN-fix? [y/N]:${CR} "
+        local a; read -r a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            _disable_synfix
+        else
+            echo -e "  ${CD}Оставлено без изменений${CR}"
+        fi
+    else
+        echo -e "  ${CC}●${CR} SYN-fix сейчас: ${CD}не применён${CR}"
+        echo -ne "  ${CB}Применить SYN-fix? [Y/n]:${CR} "
+        local a; read -r a
+        if [[ ! "$a" =~ ^[Nn]$ ]]; then
+            _apply_synfix
+        else
+            echo -e "  ${CD}Отменено${CR}"
+        fi
     fi
 }
 
@@ -374,7 +440,7 @@ main() {
         echo -e "  ${CB}${CW}Управление Telemt${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
         echo -e "    ${CB}[1]${CR} ${CB}Редактирование конфигурации${CR}"
-        echo -e "    ${CB}[2]${CR} ${CB}Применить SYN-fix${CR}"
+        echo -e "    ${CB}[2]${CR} ${CB}SYN-fix (применить / отключить)${CR}"
         echo -e "    ${CB}[3]${CR} ${CB}Перезапустить сервис${CR}"
         echo -e "    ${CB}[4]${CR} ${CB}Остановить сервис${CR}"
         echo -e "    ${CB}[5]${CR} ${CB}Xray Upstream Tunnel${CR}"
@@ -407,7 +473,7 @@ main() {
                 fi
                 ;;
             2)
-                _apply_synfix
+                _synfix_menu
                 ;;
             3)
                 systemctl restart telemt 2>/dev/null
