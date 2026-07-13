@@ -395,6 +395,12 @@ _xray_test_tunnel() {
 _xray_bind_telemt() {
     msg_step "Привязка telemt → Xray"
 
+    # ВАЖНО: у telemt (см. docs/Config_params/CONFIG_PARAMS) НЕТ ключа
+    # "socks5_proxy" — это не поддерживаемый параметр и telemt его просто
+    # игнорирует, продолжая идти к DC Telegram напрямую в Middle Proxy
+    # Mode. Правильный способ — таблица [[upstreams]] с type="socks5",
+    # и это работает ТОЛЬКО при use_middle_proxy = false.
+
     local cfg=""
     for f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
         [[ -f "$f" ]] && cfg="$f" && break
@@ -402,33 +408,69 @@ _xray_bind_telemt() {
 
     if [[ -z "$cfg" ]]; then
         msg_warn "Конфиг telemt не найден"
-        msg_info "Добавьте вручную в [general]:"
-        echo "  socks5_proxy = \"socks5://127.0.0.1:${XRAY_SOCKS_PORT}\""
+        msg_info "Добавьте вручную:"
+        echo "  use_middle_proxy = false"
+        echo ""
+        echo "  [[upstreams]]"
+        echo "  type = \"socks5\""
+        echo "  address = \"127.0.0.1:${XRAY_SOCKS_PORT}\""
+        echo "  weight = 1"
+        echo "  enabled = true"
         return 0
     fi
 
     mkdir -p /opt/telemt/backups
-    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-xray.$(date +%s)"
+    local backup_file="/opt/telemt/backups/$(basename "$cfg").pre-xray.$(date +%s)"
+    cp "$cfg" "$backup_file"
+    rollback_push "cp '${backup_file}' '${cfg}' 2>/dev/null; systemctl restart telemt 2>/dev/null || true"
 
-    local proxy_value="socks5://127.0.0.1:${XRAY_SOCKS_PORT}"
-
+    # Обратная совместимость: убрать неподдерживаемый ключ от старых версий скрипта
     if grep -qE '^socks5_proxy[[:space:]]*=' "$cfg" 2>/dev/null; then
-        sed -i "s|^socks5_proxy[[:space:]]*=.*|socks5_proxy = \"${proxy_value}\"|" "$cfg"
-    elif grep -qE '^#.*socks5_proxy' "$cfg" 2>/dev/null; then
-        sed -i "s|^#.*socks5_proxy.*|socks5_proxy = \"${proxy_value}\"|" "$cfg"
-    elif grep -q '\[general\]' "$cfg" 2>/dev/null; then
-        sed -i "/\[general\]/a socks5_proxy = \"${proxy_value}\"" "$cfg"
-    else
-        echo -e "\n[general]\nsocks5_proxy = \"${proxy_value}\"" >> "$cfg"
+        sed -i '/^socks5_proxy[[:space:]]*=/d' "$cfg"
+        msg_warn "Удалён неподдерживаемый ключ socks5_proxy (устаревший формат — telemt его не читает)"
     fi
 
-    msg_ok "socks5_proxy = ${proxy_value}"
+    # Идемпотентность: если блок от установщика уже есть — снести перед повторной записью
+    if grep -q '# >>> Xray upstream (installer)' "$cfg" 2>/dev/null; then
+        sed -i '/# >>> Xray upstream (installer)/,/# <<< Xray upstream (installer)/d' "$cfg"
+    fi
 
-    # Перезапуск telemt
+    # use_middle_proxy обязателен false — иначе telemt игнорирует upstreams
+    # и продолжает ходить в DC напрямую (Middle Proxy Mode)
+    if grep -qE '^use_middle_proxy[[:space:]]*=' "$cfg" 2>/dev/null; then
+        sed -i 's/^use_middle_proxy[[:space:]]*=.*/use_middle_proxy = false/' "$cfg"
+    elif grep -q '\[general\]' "$cfg" 2>/dev/null; then
+        sed -i '/\[general\]/a use_middle_proxy = false' "$cfg"
+    else
+        echo -e "\n[general]\nuse_middle_proxy = false" >> "$cfg"
+    fi
+    msg_warn "use_middle_proxy = false (обязательно для работы upstream socks5)"
+
+    cat >> "$cfg" << UPSEOF
+
+# >>> Xray upstream (installer)
+[[upstreams]]
+type = "socks5"
+address = "127.0.0.1:${XRAY_SOCKS_PORT}"
+weight = 1
+enabled = true
+# <<< Xray upstream (installer)
+UPSEOF
+
+    msg_ok "telemt → [[upstreams]] socks5 127.0.0.1:${XRAY_SOCKS_PORT}"
+
+    # Перезапуск telemt с проверкой, что он реально не упал в reject-loop
     if systemctl is-active --quiet telemt 2>/dev/null; then
         systemctl restart telemt >> "$LOG_FILE" 2>&1
         sleep 3
-        systemctl is-active --quiet telemt && msg_ok "telemt перезапущен" || msg_warn "telemt не стартовал"
+        if systemctl is-active --quiet telemt; then
+            msg_ok "telemt перезапущен"
+        else
+            msg_err "telemt не стартовал после изменения конфига — откат к предыдущему конфигу"
+            cp "$backup_file" "$cfg"
+            systemctl restart telemt >> "$LOG_FILE" 2>&1
+            return 1
+        fi
     fi
 }
 
@@ -446,12 +488,32 @@ xray_upstream_remove() {
     rm -f "$XRAY_BIN"
     rm -rf "$XRAY_CONFIG_DIR" "$XRAY_LOG_DIR"
 
-    # Убрать socks5_proxy из конфига telemt
+    # Убрать блок [[upstreams]] и вернуть use_middle_proxy = true в конфиге telemt
     for f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
-        if [[ -f "$f" ]] && grep -q 'socks5_proxy' "$f" 2>/dev/null; then
-            sed -i '/^socks5_proxy/d' "$f"
-            msg_ok "socks5_proxy удалён из $(basename "$f")"
-            systemctl is-active --quiet telemt 2>/dev/null && systemctl restart telemt 2>/dev/null
+        [[ -f "$f" ]] || continue
+        local changed=false
+
+        if grep -q '# >>> Xray upstream (installer)' "$f" 2>/dev/null; then
+            mkdir -p /opt/telemt/backups
+            cp "$f" "/opt/telemt/backups/$(basename "$f").pre-xray-remove.$(date +%s)"
+            sed -i '/# >>> Xray upstream (installer)/,/# <<< Xray upstream (installer)/d' "$f"
+            changed=true
+        fi
+
+        # Обратная совместимость: подчистить устаревший неверный ключ, если остался от старых версий
+        if grep -qE '^socks5_proxy[[:space:]]*=' "$f" 2>/dev/null; then
+            sed -i '/^socks5_proxy[[:space:]]*=/d' "$f"
+            changed=true
+        fi
+
+        if grep -qE '^use_middle_proxy[[:space:]]*=[[:space:]]*false' "$f" 2>/dev/null; then
+            sed -i 's/^use_middle_proxy[[:space:]]*=.*/use_middle_proxy = true/' "$f"
+            changed=true
+        fi
+
+        if [[ "$changed" == "true" ]]; then
+            msg_ok "Конфиг $(basename "$f") очищен от Xray upstream (use_middle_proxy восстановлен → true)"
+            systemctl is-active --quiet telemt 2>/dev/null && systemctl restart telemt >> "$LOG_FILE" 2>&1
         fi
     done
 
@@ -496,7 +558,7 @@ xray_upstream_setup() {
         "Протокол:  ${C_WHITE}${proto}${C_RESET}" \
         "Inbound:   ${C_WHITE}SOCKS5 127.0.0.1:${XRAY_SOCKS_PORT}${C_RESET}" \
         "Routing:   ${C_WHITE}${#TG_IPV4_CIDRS[@]} IPv4 + ${#TG_IPV6_CIDRS[@]} IPv6 подсетей TG${C_RESET}" \
-        "Привязка:  ${C_WHITE}telemt → socks5_proxy${C_RESET}"
+        "Привязка:  ${C_WHITE}telemt → [[upstreams]] (socks5)${C_RESET}"
 
     # Молчаливая установка
     _xray_install_binary         || return 1
