@@ -374,8 +374,51 @@ _xray_change_key() {
     if systemctl is-active --quiet xray 2>/dev/null; then
         echo -e "  ${CG}✔${CR} Ключ обновлён, Xray перезапущен"
         _xray_test_tunnel 2>/dev/null || true
+        # Ключ туннеля сменился, но привязка telemt → upstreams не зависит
+        # от него напрямую — на всякий случай самопроверяемся: если конфиг
+        # telemt был сломан старым форматом (socks5_proxy) или привязки
+        # вообще нет, восстанавливаем её здесь же, не заставляя идти
+        # в полный установщик.
+        _xray_verify_binding
     else
         echo -e "  ${CRED}✘${CR} Xray не запустился с новым ключом — проверьте: journalctl -u xray -n 20"
+    fi
+}
+
+# Проверка/восстановление привязки telemt → Xray upstream.
+# Считается корректной, только если:
+#   1) есть маркированный блок [[upstreams]] от установщика
+#   2) use_middle_proxy = false
+#   3) нет устаревшего неподдерживаемого ключа socks5_proxy
+# Если хоть одно условие не выполнено — молча пересобираем привязку
+# через уже исправленную _xray_bind_telemt() (идемпотентна, с rollback).
+_xray_verify_binding() {
+    local cfg=""
+    for f in /etc/telemt/telemt.toml /etc/telemt/config.toml; do
+        [[ -f "$f" ]] && cfg="$f" && break
+    done
+
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CY}⚠${CR} Конфиг telemt не найден — привязку проверить не удалось"
+        return 1
+    fi
+
+    local broken=false
+    grep -q '# >>> Xray upstream (installer)' "$cfg" 2>/dev/null || broken=true
+    grep -qE '^use_middle_proxy[[:space:]]*=[[:space:]]*false' "$cfg" 2>/dev/null || broken=true
+    grep -qE '^socks5_proxy[[:space:]]*=' "$cfg" 2>/dev/null && broken=true
+
+    if [[ "$broken" == "false" ]]; then
+        echo -e "  ${CG}✔${CR} Привязка telemt → Xray в порядке"
+        return 0
+    fi
+
+    echo -e "  ${CY}⚠${CR} Привязка telemt → Xray повреждена или отсутствует — восстанавливаю"
+    if declare -F _xray_bind_telemt &>/dev/null; then
+        _xray_bind_telemt
+    else
+        echo -e "  ${CRED}✘${CR} Функция восстановления недоступна (модуль не загружен)"
+        return 1
     fi
 }
 
@@ -401,21 +444,29 @@ _xray_menu() {
         echo -e "    ${CB}[1]${CR} ${CB}Остановить туннель${CR}"
         echo -e "    ${CB}[2]${CR} ${CB}Перезапустить туннель${CR}"
         echo -e "    ${CB}[3]${CR} ${CB}Изменить ключ подключения${CR}"
-        echo -e "    ${CB}[4]${CR} ${CB}Назад${CR}"
+        echo -e "    ${CB}[4]${CR} ${CB}Проверить привязку к telemt${CR}"
+        echo -e "    ${CB}[5]${CR} ${CB}Назад${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
         local xchoice=""
         while true; do
-            echo -ne "  ${CB}Выбор${CR} [1-4]: "
+            echo -ne "  ${CB}Выбор${CR} [1-5]: "
             read -r xchoice
-            case "$xchoice" in 1|2|3|4) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 4" ;; esac
+            case "$xchoice" in 1|2|3|4|5) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 5" ;; esac
         done
 
         case "$xchoice" in
             1) _xray_stop ;;
             2) _xray_restart ;;
             3) _xray_change_key ;;
-            4) return ;;
+            4)
+                if _xray_load_module; then
+                    _xray_verify_binding
+                else
+                    echo -e "  ${CRED}✘${CR} Модули установщика не найдены (/opt/telemt-installer)"
+                fi
+                ;;
+            5) return ;;
         esac
 
         echo ""
