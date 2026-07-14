@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
 #  modules/optimization.sh — Оптимизация и фиксы DPI для telemt
-#  Приоритет: MTPROTO_FIX_By_MEKO (v0.74), дополнено MTproxy-reanimation
+#  База: MTPROTO_FIX_By_MEKO (v0.74) + MTproxy-reanimation
+#  Обновлено под telemt 3.4.23: нативный synlimit ([[server.listeners]]),
+#  client_mss_bulk (фрагментация только handshake), rst_on_close,
+#  server.conntrack_control (опционально)
 # ═══════════════════════════════════════════════════════════════════
 
 # ── Константы ─────────────────────────────────────────────────────
@@ -208,33 +211,154 @@ _opt_remove_syn_fix() {
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  Фикс 2: Отключение MSS в конфиге Telemt (MEKO)
-#  MEKO считает MSS вредным для обхода DPI — закомментирует строки
+#  Фикс 1b: SYN FIX — нативный synlimit telemt (>= 3.4.18, доработан
+#  в 3.4.20 "Synlimit V2" и 3.4.23 "per-target netfilter rules")
+#  Правила ставит и снимает сам telemt через [[server.listeners]] —
+#  не требует iptables-persistent, hot-reloadable, CAP_NET_ADMIN уже
+#  выдан сервису telemt.service (telemt_core.sh).
 # ══════════════════════════════════════════════════════════════════
-opt_disable_mss() {
-    msg_step "Отключение MSS в конфиге Telemt (MEKO)"
+# Формат блока идентичен _apply_synfix()/_disable_synfix() в modules/mytelemtinfo —
+# один и тот же маркированный блок можно ставить/снимать что установщиком,
+# что day-2 CLI, без конфликтов и дублей.
+
+# Проверка: настроен ли нативный synlimit
+_is_native_synlimit_installed() {
+    local cfg
+    cfg=$(_opt_detect_config)
+    [[ -z "$cfg" || ! -f "$cfg" ]] && return 1
+    grep -q 'synlimit' "$cfg" 2>/dev/null
+}
+
+# Любой SYN FIX (внешний или нативный) сейчас активен?
+_is_any_syn_fix_active() {
+    _is_syn_fix_installed && return 0
+    _is_native_synlimit_installed && return 0
+    return 1
+}
+
+opt_syn_fix_native() {
+    msg_step "SYN FIX — нативный synlimit telemt (>=3.4.18)"
 
     local cfg
     cfg=$(_opt_detect_config)
-    if [[ -z "$cfg" ]]; then
+    if [[ -z "$cfg" || ! -f "$cfg" ]]; then
+        msg_err "Конфиг telemt не найден — нативный SYN FIX недоступен"
+        return 1
+    fi
+
+    # Снять внешнюю цепочку, если была установлена ранее — иначе двойной лимит
+    if _is_syn_fix_installed; then
+        msg_warn "Обнаружена внешняя цепочка ${OPT_SYNFIX_CHAIN} — снимаю её"
+        _opt_remove_syn_fix
+    fi
+
+    if _is_native_synlimit_installed; then
+        msg_warn "Нативный synlimit уже настроен — пропуск"
+        return 0
+    fi
+
+    draw_info_box 62 \
+        "${C_BOLD}SYN FIX — встроенный synlimit telemt${C_RESET}" \
+        "" \
+        "iOS-бакет:   1s / 15 hits / burst 30" \
+        "Общий бакет: 60s / 54 hits / burst 1" \
+        "" \
+        "Правила ставит и снимает сам telemt (CAP_NET_ADMIN уже выдан)." \
+        "Тот же блок доступен для переключения в mytelemtinfo → [2] SYN-fix"
+
+    mkdir -p "$OPT_BACKUP_DIR"
+    cp "$cfg" "${OPT_BACKUP_DIR}/$(basename "$cfg").pre-synlimit.$(date +%s)"
+    rollback_push "cp '${OPT_BACKUP_DIR}/$(basename "$cfg").pre-synlimit.'* '${cfg}' 2>/dev/null || true; systemctl restart telemt 2>/dev/null || true"
+
+    cat >> "$cfg" << 'SYNEOF'
+
+# >>> SYN-fix (mytelemtinfo) — не редактировать вручную, блок управляется автоматически
+[[server.listeners]]
+ip = "0.0.0.0"
+synlimit = "iptables"
+synlimit_ios_hitcount = 15
+synlimit_ios_seconds  = 1
+synlimit_ios_burst    = 30
+synlimit_hitcount = 54
+synlimit_seconds  = 60
+synlimit_burst    = 1
+# <<< SYN-fix (mytelemtinfo)
+SYNEOF
+
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        run_with_spinner "Перезапуск telemt (применить synlimit)" systemctl restart telemt
+    fi
+
+    msg_ok "Нативный SYN FIX включён (управляется также через mytelemtinfo)"
+}
+
+# Выбор способа SYN FIX: нативный (по умолчанию) или внешний iptables-модуль (MEKO)
+opt_choose_syn_fix() {
+    echo ""
+    msg_step "Выбор способа SYN FIX"
+    echo -e "    ${C_GREEN}[1]${C_RESET} Нативный synlimit telemt ${C_DIM}(рекомендуется, telemt >=3.4.18)${C_RESET}"
+    echo -e "    ${C_CYAN}[2]${C_RESET} Внешний iptables-модуль ${C_DIM}(MEKO, оригинальный)${C_RESET}"
+    echo -ne "  ${C_BOLD}Выбор${C_RESET} [1/2, Enter = 1]: "
+    local choice
+    read -r choice
+    case "$choice" in
+        2)
+            opt_syn_fix || msg_warn "SYN FIX (внешний) — ошибка (пропущен)"
+            ;;
+        *)
+            opt_syn_fix_native || {
+                msg_warn "Нативный SYN FIX не удался — пробую внешний iptables-модуль"
+                opt_syn_fix || msg_warn "SYN FIX (внешний) — ошибка (пропущен)"
+            }
+            ;;
+    esac
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  Фикс 2: Умная фрагментация MSS (telemt >= 3.4.19: client_mss_bulk)
+#  Низкий MSS применяется ТОЛЬКО на TLS-handshake (обход DPI по паттерну
+#  ClientHello); для bulk-данных MSS поднимается обратно — это убирает
+#  многократный рост packets-per-second, который раньше давал полный
+#  disable MSS (MEKO-подход, комментирование строк).
+# ══════════════════════════════════════════════════════════════════
+OPT_CLIENT_MSS="tspu"        # extreme-low=88 | tspu=92 | 2in8=256 | своё число 88..4096
+OPT_CLIENT_MSS_BULK="1400"   # MSS для данных после хендшейка
+
+opt_smart_mss() {
+    msg_step "MSS: client_mss + client_mss_bulk (умная фрагментация)"
+
+    local cfg
+    cfg=$(_opt_detect_config)
+    if [[ -z "$cfg" || ! -f "$cfg" ]]; then
         msg_info "Конфиг не найден — пропуск"
         return 0
     fi
 
-    # Проверка: есть ли активные строки с mss
-    if grep -qi 'mss' "$cfg" 2>/dev/null | grep -v '^#' | grep -q . 2>/dev/null; then
-        msg_info "Обнаружены активные строки с MSS в ${cfg}"
+    local cur_mss cur_bulk
+    cur_mss=$(grep -E '^client_mss[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+    cur_bulk=$(grep -E '^client_mss_bulk[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
 
-        # Бэкап
-        mkdir -p "$OPT_BACKUP_DIR"
-        cp "$cfg" "${OPT_BACKUP_DIR}/$(basename "$cfg").pre-mss.$(date +%s)"
-        rollback_push "cp '${OPT_BACKUP_DIR}/$(basename "$cfg").pre-mss.'* '${cfg}' 2>/dev/null || true"
-
-        sed -i 's/^[[:space:]]*\(.*mss.*\)/#\1/i' "$cfg"
-        msg_ok "MSS отключен (строки закомментированы)"
-    else
-        msg_info "MSS уже отключен или отсутствует"
+    if [[ "$cur_mss" == "$OPT_CLIENT_MSS" && "$cur_bulk" == "$OPT_CLIENT_MSS_BULK" ]]; then
+        msg_info "client_mss/client_mss_bulk уже настроены (${cur_mss} / ${cur_bulk})"
+        return 0
     fi
+
+    # Бэкап
+    mkdir -p "$OPT_BACKUP_DIR"
+    cp "$cfg" "${OPT_BACKUP_DIR}/$(basename "$cfg").pre-mss.$(date +%s)"
+    rollback_push "cp '${OPT_BACKUP_DIR}/$(basename "$cfg").pre-mss.'* '${cfg}' 2>/dev/null || true"
+
+    # Снять устаревшие закомментированные MEKO-строки вида "#mss = ..." (если остались от прошлых версий скрипта)
+    sed -i '/^#.*\bmss\b/Id' "$cfg" 2>/dev/null || true
+
+    _toml_set "client_mss" "\"${OPT_CLIENT_MSS}\"" "server" "$cfg"
+    _toml_set "client_mss_bulk" "\"${OPT_CLIENT_MSS_BULK}\"" "server" "$cfg"
+
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        run_with_spinner "Перезапуск telemt" systemctl restart telemt
+    fi
+
+    msg_ok "client_mss=\"${OPT_CLIENT_MSS}\" (только handshake), client_mss_bulk=\"${OPT_CLIENT_MSS_BULK}\" (данные)"
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -377,6 +501,17 @@ LIMEOF
             msg_info "client_keepalive уже 120"
         fi
 
+        # rst_on_close = "errors" (telemt >= 3.4.x) — мгновенный RST вместо
+        # честного FIN для соединений, не прошедших MTProto-хендшейк
+        # (сканеры/DPI-пробы/боты) — освобождает orphan-сокеты быстрее
+        local cur_rst; cur_rst=$(grep -E '^rst_on_close[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        if [[ "$cur_rst" != "errors" && "$cur_rst" != "always" ]]; then
+            _toml_set "rst_on_close" "\"errors\"" "general" "$cfg"
+            changed=true; msg_ok 'rst_on_close = "errors" (мгновенный RST для сканеров/DPI-проб)'
+        else
+            msg_info "rst_on_close уже настроен (${cur_rst})"
+        fi
+
         # Перезапуск при изменениях
         if [[ "$changed" == "true" ]]; then
             if systemctl is-active --quiet telemt 2>/dev/null; then
@@ -396,6 +531,49 @@ LIMEOF
         echo "  client_handshake = 15"
         echo "  client_keepalive = 120"
     fi
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  Фикс 3b: Нативный conntrack control telemt (>= 3.4.20)
+#  Снижает нагрузку на conntrack-таблицу ядра под высоким RPS ценой
+#  того, что соединения на прокси-порту перестают отслеживаться ядром
+#  (notrack). Меняет поведение файрвола — решение спрашиваем явно.
+# ══════════════════════════════════════════════════════════════════
+opt_conntrack_control() {
+    local cfg
+    cfg=$(_opt_detect_config)
+    [[ -z "$cfg" || ! -f "$cfg" ]] && return 0
+
+    if grep -q '^\[server\.conntrack_control\]' "$cfg" 2>/dev/null; then
+        msg_info "server.conntrack_control уже настроен — пропуск"
+        return 0
+    fi
+
+    echo ""
+    msg_info "telemt может сам управлять conntrack (снижает нагрузку под высоким RPS,"
+    msg_info "но соединения на прокси-порту перестают отслеживаться ядром — notrack)."
+    if ! confirm_yn "Включить server.conntrack_control (mode=notrack)?" "n"; then
+        msg_info "conntrack_control пропущен"
+        return 0
+    fi
+
+    mkdir -p "$OPT_BACKUP_DIR"
+    cp "$cfg" "${OPT_BACKUP_DIR}/$(basename "$cfg").pre-conntrack.$(date +%s)"
+    rollback_push "cp '${OPT_BACKUP_DIR}/$(basename "$cfg").pre-conntrack.'* '${cfg}' 2>/dev/null || true; systemctl restart telemt 2>/dev/null || true"
+
+    cat >> "$cfg" << CTEOF
+
+[server.conntrack_control]
+inline_conntrack_control = true
+mode = "notrack"
+backend = "auto"
+profile = "balanced"
+CTEOF
+
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        run_with_spinner "Перезапуск telemt" systemctl restart telemt
+    fi
+    msg_ok "server.conntrack_control включён (mode=notrack, backend=auto, profile=balanced)"
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -447,17 +625,20 @@ apply_mtproto_fixes_selfmask() {
     msg_info "В режиме selfmask прокси и сайт делят порт 443."
     echo ""
 
-    # MSS disable (MEKO)
-    opt_disable_mss || true
+    # MSS: умная фрагментация только handshake (telemt >= 3.4.19)
+    opt_smart_mss || true
 
-    # Базовая оптимизация (MEKO sysctl + telemt tuning)
+    # Базовая оптимизация (sysctl + telemt tuning + rst_on_close)
     opt_basic_optimization || true
 
-    # SYN FIX — MEKO оригинал на порт 443 (выполняется молча)
+    # SYN FIX на порт 443 — выбор: нативный synlimit или внешний MEKO
     local save_port="${TELEMT_PORT:-}"
     TELEMT_PORT="443"
-    opt_syn_fix || msg_warn "SYN FIX — ошибка (пропущен)"
+    opt_choose_syn_fix
     TELEMT_PORT="$save_port"
+
+    # Опционально: нативный conntrack control (telemt >= 3.4.20)
+    opt_conntrack_control || true
 
     # КРИТИЧНО: убрать все standalone ACCEPT 443, которые обходят SYN FIX
     # (добавлены sitemask_configure_nginx ранее для telemt bootstrap)
@@ -492,12 +673,13 @@ apply_mtproto_fixes_selfmask() {
     draw_info_box 62 \
         "${C_BOLD}Selfmask оптимизации:${C_RESET}" \
         "" \
-        " ${CHECK} MSS отключен в конфиге telemt" \
+        " ${CHECK} MSS: client_mss/client_mss_bulk (только handshake)" \
         " ${CHECK} BBR + TCP Fast Open + somaxconn=65535" \
         " ${CHECK} TCP keepalive: time=45, intvl=15, probes=3" \
         " ${CHECK} telemt: max_connections=16384, handshake=15" \
+        " ${CHECK} rst_on_close=errors" \
         " ${CHECK} LimitNOFILE=65535 (systemd override)" \
-        " ${CHECK} SYN FIX MEKO (54/min) — standalone ACCEPT убран" \
+        " ${CHECK} SYN FIX (нативный synlimit или MEKO) — standalone ACCEPT убран" \
         " ${CHECK} Порт 80 открыт (ACME), 443 через SYN FIX"
 }
 
@@ -510,18 +692,22 @@ apply_mtproto_fixes() {
     local proxy_port
     proxy_port=$(_opt_detect_port)
 
-    # Все шаги молча
-    opt_syn_fix            || msg_warn "SYN FIX — ошибка (пропущен)"
-    opt_disable_mss        || true
-    opt_basic_optimization || true
+    # Выбор способа SYN FIX (нативный synlimit telemt / внешний MEKO)
+    opt_choose_syn_fix
+    opt_smart_mss           || true
+    opt_basic_optimization  || true
+
+    # Опционально: нативный conntrack control (telemt >= 3.4.20)
+    opt_conntrack_control   || true
 
     # Firewall — открыть порт, но ПОТОМ убрать standalone ACCEPT
     # чтобы трафик шёл через SYN FIX
     opt_firewall           || true
 
-    # Если SYN FIX установлен — убрать standalone ACCEPT для прокси-порта
-    # (opt_firewall добавляет ACCEPT на позицию 1, обходя SYNFIX)
-    if _is_syn_fix_installed; then
+    # Если SYN FIX установлен (нативный или внешний) — убрать standalone
+    # ACCEPT для прокси-порта (opt_firewall добавляет ACCEPT на позицию 1,
+    # обходя SYN FIX)
+    if _is_any_syn_fix_active; then
         while iptables -D INPUT -p tcp --dport "$proxy_port" -j ACCEPT 2>/dev/null; do :; done
         msg_ok "Standalone ACCEPT ${proxy_port} удалён (трафик идёт через SYN FIX)"
 
@@ -546,13 +732,14 @@ apply_mtproto_fixes() {
     draw_info_box 62 \
         "${C_BOLD}Применённые оптимизации:${C_RESET}" \
         "" \
-        " ${CHECK} SYN FIX (MEKO): iptables 4-правила, iOS+общий" \
-        " ${CHECK} MSS отключен в конфиге telemt" \
+        " ${CHECK} SYN FIX: нативный synlimit telemt или MEKO iptables" \
+        " ${CHECK} MSS: client_mss/client_mss_bulk (только handshake)" \
         " ${CHECK} BBR congestion control + TCP Fast Open" \
         " ${CHECK} sysctl: somaxconn=65535, backlog=65535, file-max=2M" \
         " ${CHECK} TCP keepalive: time=45, intvl=15, probes=3" \
         " ${CHECK} telemt: max_connections=16384, handshake=15" \
         " ${CHECK} telemt: tg_connect=30, keepalive=120 (reanimation)" \
+        " ${CHECK} rst_on_close=errors" \
         " ${CHECK} LimitNOFILE=65535 (systemd override)" \
         " ${CHECK} Firewall — порты открыты"
 }
