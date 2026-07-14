@@ -143,6 +143,30 @@ _run_cleaner() {
         fi
     fi
 
+    # Nginx-служба — проверяется НЕЗАВИСИМО от наличия конфига selfmask,
+    # т.к. конфиг может быть уже удалён (например selfmask-блоком выше
+    # в прошлый запуск), а сама служба продолжает работать
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        ((found++))
+        echo -ne "  ${CB}Nginx активен — [1] остановить [2] удалить [3] оставить:${CR} "
+        local ng; read -r ng
+        case "$ng" in
+            1)
+                systemctl stop nginx 2>/dev/null; systemctl disable nginx 2>/dev/null
+                echo -e "  ${CG}✔${CR} Nginx остановлен и отключён"
+                ;;
+            2)
+                systemctl stop nginx 2>/dev/null
+                DEBIAN_FRONTEND=noninteractive apt-get purge -y nginx nginx-common nginx-core &>/dev/null
+                rm -rf /etc/nginx
+                echo -e "  ${CG}✔${CR} Nginx полностью удалён"
+                ;;
+            *)
+                echo -e "  ${CD}Nginx оставлен${CR}"
+                ;;
+        esac
+    fi
+
     # MEKO
     if [[ -f /etc/sysctl.d/99-telemt-tuning.conf ]] || iptables -L MTPR_SYNFIX -n &>/dev/null 2>&1 || [[ -d /etc/systemd/system/telemt.service.d ]]; then
         ((found++))

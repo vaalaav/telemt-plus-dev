@@ -140,26 +140,50 @@ _clean_sitemask() {
         msg_ok "Cron certbot удалён"
     fi
 
-    # Nginx — предложить остановить/удалить
-    if _has_nginx; then
-        echo ""
-        echo -e "    ${C_BOLD}[1]${C_RESET} Остановить Nginx (можно включить позже)"
-        echo -e "    ${C_BOLD}[2]${C_RESET} Полностью удалить Nginx"
-        echo -e "    ${C_BOLD}[3]${C_RESET} Оставить Nginx"
-        local ng=""
-        while true; do
-            echo -ne "  ${C_BOLD}Nginx${C_RESET} [1/2/3]: "
-            read -r ng </dev/tty || true
-            case "$ng" in
-                1) systemctl stop nginx; systemctl disable nginx >> "$LOG_FILE" 2>&1; msg_ok "Nginx остановлен"; break ;;
-                2) systemctl stop nginx 2>/dev/null; apt-get remove -y nginx nginx-common >> "$LOG_FILE" 2>&1; msg_ok "Nginx удалён"; break ;;
-                3) msg_info "Nginx оставлен"; break ;;
-                *) msg_warn "Введите 1, 2 или 3" ;;
-            esac
-        done
-    fi
-
     msg_ok "Selfmask удалён"
+    msg_info "Управление самой службой Nginx будет предложено отдельным шагом ниже"
+}
+
+# ── Управление службой Nginx (независимо от наличия selfmask-конфига) ─
+# Вызывается всегда, если Nginx активен, даже если сайт-маска уже
+# была снята вручную ранее (например через mytelemtinfo) и
+# _has_sitemask() больше не детектит её конфиг.
+_clean_nginx_service() {
+    msg_step "Служба Nginx"
+
+    msg_info "Обнаружена активная служба Nginx на сервере"
+    echo ""
+    echo -e "    ${C_BOLD}[1]${C_RESET} Остановить и отключить Nginx (пакет останется, можно включить позже)"
+    echo -e "    ${C_BOLD}[2]${C_RESET} Полностью удалить Nginx (apt purge + конфиги)"
+    echo -e "    ${C_BOLD}[3]${C_RESET} Оставить Nginx как есть"
+    local ng=""
+    while true; do
+        echo -ne "  ${C_BOLD}Nginx${C_RESET} [1/2/3]: "
+        read -r ng </dev/tty || true
+        case "$ng" in
+            1)
+                systemctl stop nginx 2>/dev/null
+                systemctl disable nginx >> "$LOG_FILE" 2>&1
+                msg_ok "Nginx остановлен и отключён (disable)"
+                break
+                ;;
+            2)
+                systemctl stop nginx 2>/dev/null
+                DEBIAN_FRONTEND=noninteractive apt-get purge -y nginx nginx-common nginx-core >> "$LOG_FILE" 2>&1
+                DEBIAN_FRONTEND=noninteractive apt-get autoremove -y >> "$LOG_FILE" 2>&1 || true
+                rm -rf /etc/nginx
+                msg_ok "Nginx полностью удалён (пакет + /etc/nginx)"
+                break
+                ;;
+            3)
+                msg_info "Nginx оставлен без изменений"
+                break
+                ;;
+            *)
+                msg_warn "Введите 1, 2 или 3"
+                ;;
+        esac
+    done
 }
 
 # ── Удаление: фиксы MEKO ─────────────────────────────────────────
@@ -276,10 +300,26 @@ cleaner_run() {
         found_xray=true; ((found_count++))
     fi
 
-    if [[ $found_count -eq 0 ]]; then
+    # Nginx проверяется отдельно и НЕ участвует в found_count для telemt-
+    # компонентов, т.к. он может быть системным веб-сервером, а не частью
+    # проекта. Но именно поэтому проверка не должна зависеть от того,
+    # найдены ли остальные telemt-компоненты — иначе шаг недостижим,
+    # если, например, конфиг selfmask уже был удалён вручную ранее.
+    local found_nginx=false
+    if _has_nginx; then
+        echo -e "    ${C_YELLOW}${WARN}${C_RESET} ${C_BOLD}Nginx${C_RESET} — служба активна (не обязательно относится к telemt)"
+        found_nginx=true
+    fi
+
+    if [[ $found_count -eq 0 && "$found_nginx" == "false" ]]; then
         echo -e "    ${C_DIM}Ничего не найдено — система чистая${C_RESET}"
         echo ""
         return 0
+    fi
+
+    if [[ $found_count -eq 0 ]]; then
+        msg_info "telemt-компоненты не найдены, но Nginx активен — см. шаг ниже"
+        echo ""
     fi
 
     echo ""
@@ -343,6 +383,11 @@ cleaner_run() {
         else
             msg_info "telemt — оставлен"
         fi
+        echo ""
+    fi
+
+    if [[ "$found_nginx" == "true" ]]; then
+        _clean_nginx_service
         echo ""
     fi
 
