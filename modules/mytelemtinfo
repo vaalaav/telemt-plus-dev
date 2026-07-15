@@ -64,6 +64,26 @@ _print_status() {
             echo -e "  ${CC}▐${CR}  SYN-fix:   ${CD}Не применён${CR}"
         fi
 
+        # MSS (client_mss / client_mss_bulk)
+        local mss_val mss_bulk
+        mss_val=$(grep -E '^client_mss[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        mss_bulk=$(grep -E '^client_mss_bulk[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        if [[ -n "$mss_val" && -n "$mss_bulk" ]]; then
+            echo -e "  ${CC}▐${CR}  MSS:       ${CG}${mss_val}${CR} ${CD}(handshake) → ${mss_bulk} (bulk)${CR}"
+        elif [[ -n "$mss_val" ]]; then
+            echo -e "  ${CC}▐${CR}  MSS:       ${CG}${mss_val}${CR} ${CD}(весь трафик, без bulk-возврата)${CR}"
+        else
+            echo -e "  ${CC}▐${CR}  MSS:       ${CD}не задан (ядро по умолчанию)${CR}"
+        fi
+
+        # rst_on_close
+        local rst_val
+        rst_val=$(grep -E '^rst_on_close[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+        case "$rst_val" in
+            errors|always) echo -e "  ${CC}▐${CR}  RST-close: ${CG}${rst_val}${CR}" ;;
+            *)             echo -e "  ${CC}▐${CR}  RST-close: ${CD}off${CR}" ;;
+        esac
+
         # Xray туннель
         if systemctl is-active --quiet xray 2>/dev/null; then
             echo -e "  ${CC}▐${CR}  Xray:      ${CG}● Активен${CR}"
@@ -358,7 +378,7 @@ _xray_change_key() {
 
     if ! _xray_load_module; then
         echo -e "  ${CRED}✘${CR} Модули установщика не найдены (/opt/telemt-installer)"
-        echo -e "  ${CD}Переустановите ключ через полный установщик: пункт [6] Xray Upstream Tunnel${CR}"
+        echo -e "  ${CD}Переустановите ключ через полный установщик: пункт [7] Xray Upstream Tunnel${CR}"
         return 1
     fi
 
@@ -446,6 +466,184 @@ _xray_verify_binding() {
     fi
 }
 
+# ── TOML-хелперы (аналог _toml_set в modules/optimization.sh) ─────
+_toml_set_line() {
+    local key="$1" value="$2" section="$3" file="$4"
+    [[ -f "$file" ]] || return 1
+    if grep -qE "^${key}[[:space:]]*=" "$file" 2>/dev/null; then
+        sed -i "s|^${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
+        return 0
+    fi
+    if grep -qE "^\[${section}\]" "$file" 2>/dev/null; then
+        sed -i "/^\[${section}\]/a ${key} = ${value}" "$file"
+        return 0
+    fi
+    printf '\n[%s]\n%s = %s\n' "$section" "$key" "$value" >> "$file"
+}
+
+_toml_remove_line() {
+    local key="$1" file="$2"
+    [[ -f "$file" ]] || return 0
+    sed -i "/^${key}[[:space:]]*=/d" "$file"
+}
+
+# ── MSS: client_mss + client_mss_bulk (telemt >= 3.4.19) ──────────
+# client_mss фрагментирует только TLS-handshake (обход DPI по паттерну
+# ClientHello), client_mss_bulk возвращает нормальный MSS на данных —
+# без этого низкий MSS держится на всё соединение и множит PPS.
+_apply_mss() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    mkdir -p /opt/telemt/backups 2>/dev/null
+    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-mss.$(date +%s)" 2>/dev/null
+
+    _toml_set_line "client_mss" '"tspu"' "server" "$cfg"
+    _toml_set_line "client_mss_bulk" '"1400"' "server" "$cfg"
+
+    systemctl restart telemt 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} MSS применён: client_mss=\"tspu\" (handshake) → client_mss_bulk=\"1400\" (bulk)"
+    else
+        echo -e "  ${CY}⚠${CR} MSS записан, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+_disable_mss() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    mkdir -p /opt/telemt/backups 2>/dev/null
+    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-disable-mss.$(date +%s)" 2>/dev/null
+
+    _toml_remove_line "client_mss" "$cfg"
+    _toml_remove_line "client_mss_bulk" "$cfg"
+
+    systemctl restart telemt 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} MSS сброшен на значение ядра, telemt перезапущен"
+    else
+        echo -e "  ${CY}⚠${CR} MSS убран, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+_mss_menu() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    local mss_val; mss_val=$(grep -E '^client_mss[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+
+    if [[ -n "$mss_val" ]]; then
+        echo -e "  ${CC}●${CR} MSS сейчас: ${CG}${mss_val}${CR} ${CD}(handshake)${CR}"
+        echo -ne "  ${CB}Сбросить MSS на значение ядра? [y/N]:${CR} "
+        local a; read -r a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            _disable_mss
+        else
+            echo -e "  ${CD}Оставлено без изменений${CR}"
+        fi
+    else
+        echo -e "  ${CC}●${CR} MSS сейчас: ${CD}не задан (ядро по умолчанию)${CR}"
+        echo -ne "  ${CB}Применить client_mss=\"tspu\" + client_mss_bulk=\"1400\"? [Y/n]:${CR} "
+        local a; read -r a
+        if [[ ! "$a" =~ ^[Nn]$ ]]; then
+            _apply_mss
+        else
+            echo -e "  ${CD}Отменено${CR}"
+        fi
+    fi
+}
+
+# ── RST-close: rst_on_close (telemt >= 3.4.x) ──────────────────────
+# "errors" — мгновенный RST вместо честного FIN для соединений, не
+# прошедших MTProto-хендшейк (сканеры/DPI-пробы/боты); освобождает
+# orphan-сокеты быстрее. Успешные relay-сессии закрываются как обычно.
+_apply_rst() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    mkdir -p /opt/telemt/backups 2>/dev/null
+    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-rst.$(date +%s)" 2>/dev/null
+
+    _toml_set_line "rst_on_close" '"errors"' "general" "$cfg"
+
+    systemctl restart telemt 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} rst_on_close = \"errors\" применён, telemt перезапущен"
+    else
+        echo -e "  ${CY}⚠${CR} rst_on_close записан, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+_disable_rst() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    mkdir -p /opt/telemt/backups 2>/dev/null
+    cp "$cfg" "/opt/telemt/backups/$(basename "$cfg").pre-disable-rst.$(date +%s)" 2>/dev/null
+
+    _toml_remove_line "rst_on_close" "$cfg"
+
+    systemctl restart telemt 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet telemt 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} rst_on_close выключен (off), telemt перезапущен"
+    else
+        echo -e "  ${CY}⚠${CR} rst_on_close убран, но telemt не стартовал — проверьте: journalctl -u telemt -n 20"
+    fi
+}
+
+_rst_menu() {
+    local cfg; cfg=$(_detect_config)
+    if [[ -z "$cfg" ]]; then
+        echo -e "  ${CRED}✘${CR} Конфиг telemt не найден"
+        return 1
+    fi
+
+    local rst_val; rst_val=$(grep -E '^rst_on_close[[:space:]]*=' "$cfg" 2>/dev/null | head -1 | awk -F'=' '{print $2}' | tr -d ' "')
+
+    case "$rst_val" in
+        errors|always)
+            echo -e "  ${CC}●${CR} RST-close сейчас: ${CG}${rst_val}${CR}"
+            echo -ne "  ${CB}Выключить (вернуть обычный FIN)? [y/N]:${CR} "
+            local a; read -r a
+            if [[ "$a" =~ ^[Yy]$ ]]; then
+                _disable_rst
+            else
+                echo -e "  ${CD}Оставлено без изменений${CR}"
+            fi
+            ;;
+        *)
+            echo -e "  ${CC}●${CR} RST-close сейчас: ${CD}off${CR}"
+            echo -ne "  ${CB}Применить rst_on_close=\"errors\"? [Y/n]:${CR} "
+            local a; read -r a
+            if [[ ! "$a" =~ ^[Nn]$ ]]; then
+                _apply_rst
+            else
+                echo -e "  ${CD}Отменено${CR}"
+            fi
+            ;;
+    esac
+}
+
 _xray_menu() {
     while true; do
         clear
@@ -516,18 +714,20 @@ main() {
         echo -e "  ${CD}────────────────────────────────────${CR}"
         echo -e "    ${CB}[1]${CR} ${CB}Редактирование конфигурации${CR}"
         echo -e "    ${CB}[2]${CR} ${CB}SYN-fix (применить / отключить)${CR}"
-        echo -e "    ${CB}[3]${CR} ${CB}Перезапустить сервис${CR}"
-        echo -e "    ${CB}[4]${CR} ${CB}Остановить сервис${CR}"
-        echo -e "    ${CB}[5]${CR} ${CB}Xray Upstream Tunnel${CR}"
-        echo -e "    ${CB}[6]${CR} ${CB}Пошаговая очистка системы${CR}"
-        echo -e "    ${CB}[7]${CR} ${CB}Выход${CR}"
+        echo -e "    ${CB}[3]${CR} ${CB}MSS: client_mss/client_mss_bulk (применить / сбросить)${CR}"
+        echo -e "    ${CB}[4]${CR} ${CB}RST-close при обрыве хендшейка (применить / отключить)${CR}"
+        echo -e "    ${CB}[5]${CR} ${CB}Перезапустить сервис${CR}"
+        echo -e "    ${CB}[6]${CR} ${CB}Остановить сервис${CR}"
+        echo -e "    ${CB}[7]${CR} ${CB}Xray Upstream Tunnel${CR}"
+        echo -e "    ${CB}[8]${CR} ${CB}Пошаговая очистка системы${CR}"
+        echo -e "    ${CB}[9]${CR} ${CB}Выход${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
         local choice=""
         while true; do
-            echo -ne "  ${CB}Выбор${CR} [1-7]: "
+            echo -ne "  ${CB}Выбор${CR} [1-9]: "
             read -r choice
-            case "$choice" in 1|2|3|4|5|6|7) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 7" ;; esac
+            case "$choice" in 1|2|3|4|5|6|7|8|9) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 9" ;; esac
         done
 
         case "$choice" in
@@ -551,21 +751,27 @@ main() {
                 _synfix_menu
                 ;;
             3)
+                _mss_menu
+                ;;
+            4)
+                _rst_menu
+                ;;
+            5)
                 systemctl restart telemt 2>/dev/null
                 sleep 2
                 systemctl is-active --quiet telemt && echo -e "  ${CG}✔${CR} telemt перезапущен" || echo -e "  ${CRED}✘${CR} Ошибка запуска"
                 ;;
-            4)
+            6)
                 systemctl stop telemt 2>/dev/null
                 echo -e "  ${CY}⚠${CR} telemt остановлен"
                 ;;
-            5)
+            7)
                 _xray_menu
                 ;;
-            6)
+            8)
                 _run_cleaner
                 ;;
-            7)
+            9)
                 echo -e "  ${CD}До свидания!${CR}"
                 exit 0
                 ;;
