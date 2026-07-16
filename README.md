@@ -36,7 +36,6 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - 🔧 **Выбор версии** — динамический список из последних 5 релизов через GitHub API
 - 🌐 **Привязка домена** — автоматическая проверка DNS и подстановка домена в прокси-ссылки
 - 🛡️ **Фиксы оптимизации MEKO** — SYN FIX, BBR, TCP-тюнинг, обход DPI-блокировок
-- 📊 **Панель управления** — веб-интерфейс для мониторинга и управления прокси
 - 🔗 **Xray Upstream Tunnel** — маршрутизация трафика к Telegram через внешний VPN-туннель
 - 🧹 **Интеллектуальная очистка** — аудит установленных компонентов с пошаговым удалением
 - 🖥️ **CLI-утилита `mytelemtinfo`** — быстрое управление прокси из терминала
@@ -51,11 +50,10 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 [ Дополнительные опции ]
   [3] Привязка домена к прокси
   [4] Применение фиксов оптимизации MEKO
-  [5] Установка панели управления Telemt
-  [6] Xray Upstream Tunnel
+  [5] Xray Upstream Tunnel
 
 [ Система ]
-  [7] Полная или пошаговая очистка системы
+  [6] Полная или пошаговая очистка системы
   [0] Выход
 ```
 
@@ -122,7 +120,6 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 - 🔧 **Version selector** — dynamic list of last 5 releases via GitHub API
 - 🌐 **Domain binding** — automatic DNS verification and domain substitution in proxy links
 - 🛡️ **MEKO optimization fixes** — SYN FIX, BBR, TCP tuning, DPI bypass
-- 📊 **Control panel** — web interface for proxy monitoring and management
 - 🔗 **Xray Upstream Tunnel** — route Telegram traffic through an external VPN tunnel
 - 🧹 **Smart cleanup** — component audit with step-by-step removal
 - 🖥️ **CLI utility `mytelemtinfo`** — quick proxy management from terminal
@@ -137,11 +134,10 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 [ Additional Options ]
   [3] Bind domain to proxy
   [4] Apply MEKO optimization fixes
-  [5] Install Telemt control panel
-  [6] Xray Upstream Tunnel
+  [5] Xray Upstream Tunnel
 
 [ System ]
-  [7] Full or step-by-step cleanup
+  [6] Full or step-by-step cleanup
   [0] Exit
 ```
 
@@ -196,7 +192,6 @@ sudo curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/m
 | Selfmask Guide | [assyoucandy.github.io/telemt-server-guide](https://assyoucandy.github.io/telemt-server-guide/telemt-selfmask-guide.html) |
 | MEKO DPI Fix | [github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO) |
 | MTProxy Reanimation | [github.com/Liafanx/MTproxy-reanimation](https://github.com/Liafanx/MTproxy-reanimation) |
-| Telemt Panel | [github.com/amirotin/telemt_panel](https://github.com/amirotin/telemt_panel) |
 | Xray Core | [github.com/XTLS/Xray-core](https://github.com/XTLS/Xray-core) |
 
 ---

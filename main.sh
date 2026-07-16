@@ -47,7 +47,7 @@ LOGO
 # ── Панель состояния системы ──────────────────────────────────────
 print_status_panel() {
     local os_info uptime_info cpu ram disk server_ip domain_info
-    local st_telemt st_panel st_nginx
+    local st_telemt st_nginx
 
     os_info="$(get_os_info 2>/dev/null || echo 'n/a')"
     uptime_info="$(get_uptime 2>/dev/null || echo 'n/a')"
@@ -68,7 +68,6 @@ print_status_panel() {
     fi
 
     st_telemt="$(get_service_status telemt 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
-    st_panel="$(get_service_status telemt-panel 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
     st_nginx="$(get_service_status nginx 2>/dev/null || echo -e "${C_DIM}Не установлен${C_RESET}")"
 
     # Выравнивание: значения начинаются на визуальной колонке 15
@@ -124,7 +123,6 @@ print_status_panel() {
         echo -e "  ${C_CYAN}▐${C_RESET}  telemt:        ${st_telemt}"
     fi
 
-    echo -e "  ${C_CYAN}▐${C_RESET}  telemt-panel:  ${st_panel}"
     echo -e "  ${C_CYAN}▐${C_RESET}  Nginx:         ${st_nginx}"
 
     # Фиксы MEKO
@@ -174,17 +172,6 @@ print_status_panel() {
         echo -e "  ${C_CYAN}▐${C_RESET}  ${C_CYAN}${proxy_link}${C_RESET}"
     fi
 
-    # Панель управления (если установлена)
-    local panel_url=""
-    if [[ -f /var/lib/telemt-panel/credentials.txt ]]; then
-        panel_url=$(grep '^URL:' /var/lib/telemt-panel/credentials.txt 2>/dev/null | awk '{print $2}')
-    fi
-    if [[ -n "$panel_url" ]]; then
-        echo -e "  ${C_CYAN}▐${C_RESET}"
-        echo -e "  ${C_CYAN}▐${C_RESET}  ${C_DIM}── Панель ──${C_RESET}"
-        echo -e "  ${C_CYAN}▐${C_RESET}  ${C_MAGENTA}${panel_url}${C_RESET}"
-    fi
-
     echo -e "  ${C_CYAN}▐${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
     echo ""
 }
@@ -201,11 +188,10 @@ print_menu() {
     echo -e "  ${C_BOLD}${C_WHITE}[ Дополнительные опции ]${C_RESET}"
     echo -e "    ${C_CYAN}${C_BOLD}[3]${C_RESET} ${C_BOLD}Привязка домена к прокси${C_RESET}"
     echo -e "    ${C_YELLOW}${C_BOLD}[4]${C_RESET} ${C_BOLD}Применение фиксов оптимизации MEKO${C_RESET}"
-    echo -e "    ${C_MAGENTA}${C_BOLD}[5]${C_RESET} ${C_BOLD}Установка панели управления Telemt${C_RESET}"
-    echo -e "    ${C_WHITE}${C_BOLD}[6]${C_RESET} ${C_BOLD}Xray Upstream Tunnel${C_RESET}"
+    echo -e "    ${C_WHITE}${C_BOLD}[5]${C_RESET} ${C_BOLD}Xray Upstream Tunnel${C_RESET}"
     echo ""
     echo -e "  ${C_BOLD}${C_WHITE}[ Система ]${C_RESET}"
-    echo -e "    ${C_RED}${C_BOLD}[7]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
+    echo -e "    ${C_RED}${C_BOLD}[6]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
     echo ""
     echo -e "  ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
@@ -278,12 +264,6 @@ do_meko_fixes() {
     fi
 }
 
-do_panel_install() {
-    _load_module "panel" || return 1
-    init_logging
-    panel_install
-}
-
 do_xray_upstream() {
     _load_module "xray_upstream" || return 1
     init_logging
@@ -309,7 +289,7 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-7]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-6]: "
         local choice=""
         read -r choice </dev/tty || true
 
@@ -318,9 +298,8 @@ main() {
             2) do_selfmask_install ;;
             3) do_bind_domain      ;;
             4) do_meko_fixes       ;;
-            5) do_panel_install    ;;
-            6) do_xray_upstream    ;;
-            7) do_cleanup          ;;
+            5) do_xray_upstream    ;;
+            6) do_cleanup          ;;
             0)
                 echo ""
                 msg_info "До свидания!"
