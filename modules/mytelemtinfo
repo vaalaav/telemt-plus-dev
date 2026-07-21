@@ -834,7 +834,7 @@ _update_apply() {
     if [[ "$target_version" == "latest" ]]; then
         url="https://github.com/${UPDATE_TELEMT_REPO}/releases/latest/download/telemt-${arch}-linux-${libc}.tar.gz"
     else
-        url="https://github.com/${UPDATE_TELEMT_REPO}/releases/download/v${target_version}/telemt-${arch}-linux-${libc}.tar.gz"
+        url="https://github.com/${UPDATE_TELEMT_REPO}/releases/download/${target_version}/telemt-${arch}-linux-${libc}.tar.gz"
     fi
 
     local tmp_dir; tmp_dir=$(mktemp -d) || return 1
@@ -846,7 +846,7 @@ _update_apply() {
             if [[ "$target_version" == "latest" ]]; then
                 url="https://github.com/${UPDATE_TELEMT_REPO}/releases/latest/download/telemt-x86_64-linux-gnu.tar.gz"
             else
-                url="https://github.com/${UPDATE_TELEMT_REPO}/releases/download/v${target_version}/telemt-x86_64-linux-gnu.tar.gz"
+                url="https://github.com/${UPDATE_TELEMT_REPO}/releases/download/${target_version}/telemt-x86_64-linux-gnu.tar.gz"
             fi
             curl -fSL --max-time 120 -o "${tmp_dir}/telemt.tar.gz" "$url" 2>/dev/null || {
                 rm -rf "$tmp_dir"; echo -e "  ${CRED}✘${CR} Скачивание не удалось"; return 1
