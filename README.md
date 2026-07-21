@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/vaalaav/telemt-plus-dev/main/instal
 sudo mytelemtinfo
 ```
 
-Позволяет редактировать конфиг, применять SYN-fix, перезапускать или останавливать сервис, а также запускать очистку — всё из одного меню.
+Позволяет редактировать конфиг, применять SYN-fix/MSS/RST, управлять Xray-туннелем, обновлять telemt до последней версии (с автопроверкой совместимости SYN-fix/MSS/RST/Xray/selfmask и откатом при сбое), перезапускать или останавливать сервис, а также запускать очистку — всё из одного меню.
 
 Отдельная установка утилиты:
 ```bash
@@ -175,7 +175,7 @@ After installation, the following command is available:
 sudo mytelemtinfo
 ```
 
-Edit config, apply SYN-fix, restart or stop the service, and run cleanup — all from one menu.
+Edit config, apply SYN-fix/MSS/RST, manage the Xray tunnel, update telemt to the latest version (with automatic compatibility checks for SYN-fix/MSS/RST/Xray/selfmask and rollback on failure), restart or stop the service, and run cleanup — all from one menu.
 
 Standalone utility install:
 ```bash
