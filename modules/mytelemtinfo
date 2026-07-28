@@ -431,9 +431,13 @@ _xray_change_key() {
 
 # Тест соединения через Xray-туннель до реальных серверов Telegram:
 # 1) HTTP-проверка api.telegram.org (общая доступность через SOCKS5)
-# 2) TCP connect-only (без TLS/протокола) до IP-адресов дата-центров TG —
+# 2) TLS-хендшейк (ClientHello) до IP-адресов дата-центров TG —
 #    именно так проверяется, что upstream-сервер реально пропускает
-#    трафик до DC, а не просто поднят и отвечает на локальный SOCKS5.
+#    трафик до DC. Важно: используем полноценный TLS-хендшейк
+#    (https:// + --connect-only), а НЕ голый TCP-коннект без данных —
+#    производственные DC Telegram сбрасывают "пустые" TCP-соединения
+#    почти сразу (анти-скан защита), и голый connect-only даёт
+#    ложный FAIL даже когда туннель полностью исправен.
 _xray_test_telegram() {
     if ! _xray_installed; then
         echo -e "  ${CD}Xray не установлен${CR}"
@@ -461,7 +465,8 @@ _xray_test_telegram() {
         echo -e "${CRED}FAIL${CR} (${http_code:-нет ответа})"
     fi
 
-    # ── 2. TCP connect-only до IP дата-центров Telegram ───────────
+    # ── 2. TLS-хендшейк до IP дата-центров Telegram ───────────────
+    # -k: сертификат на DC случайный/самоподписанный (fake-TLS), это ожидаемо
     local dc_labels=("DC1 (MIA)" "DC2 (AMS)" "DC3 (MIA)" "DC4 (AMS)" "DC5 (SIN)")
     local dc_ips=("149.154.175.50" "149.154.167.51" "149.154.175.100" "149.154.167.91" "91.108.56.130")
 
@@ -473,7 +478,7 @@ _xray_test_telegram() {
         local t_start t_end elapsed
         t_start=$(date +%s%N)
         if curl -x "socks5h://127.0.0.1:${socks_port}" \
-            --connect-only -s --max-time 5 "http://${ip}:443/" 2>/dev/null; then
+            -k --connect-only -s --max-time 6 "https://${ip}:443/" 2>/dev/null; then
             t_end=$(date +%s%N)
             elapsed=$(( (t_end - t_start) / 1000000 ))
             echo -e "${CG}OK${CR} (${elapsed}мс)"
@@ -487,7 +492,7 @@ _xray_test_telegram() {
     if [[ $ok -eq $total ]]; then
         echo -e "  ${CG}✔${CR} Все дата-центры доступны через туннель (${ok}/${total})"
     elif [[ $ok -eq 0 ]]; then
-        echo -e "  ${CRED}✘${CR} Ни один DC не доступен через туннель"
+        echo -e "  ${CRED}✘${CR} Ни один DC не доступен через туннель (TLS-хендшейк не прошёл)"
         echo -e "  ${CD}Проверьте ключ подключения (пункт [3]) и работоспособность upstream-сервера${CR}"
     else
         echo -e "  ${CY}⚠${CR} Доступно ${ok} из ${total} DC — возможна частичная блокировка на стороне upstream-сервера"
