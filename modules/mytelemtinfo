@@ -429,6 +429,71 @@ _xray_change_key() {
     fi
 }
 
+# Тест соединения через Xray-туннель до реальных серверов Telegram:
+# 1) HTTP-проверка api.telegram.org (общая доступность через SOCKS5)
+# 2) TCP connect-only (без TLS/протокола) до IP-адресов дата-центров TG —
+#    именно так проверяется, что upstream-сервер реально пропускает
+#    трафик до DC, а не просто поднят и отвечает на локальный SOCKS5.
+_xray_test_telegram() {
+    if ! _xray_installed; then
+        echo -e "  ${CD}Xray не установлен${CR}"
+        return
+    fi
+    if ! systemctl is-active --quiet xray 2>/dev/null; then
+        echo -e "  ${CY}⚠${CR} Xray-туннель остановлен — запустите его перед тестом (пункт [2])"
+        return 1
+    fi
+
+    local socks_port="${XRAY_SOCKS_PORT:-40000}"
+
+    echo ""
+    echo -e "  ${CB}${CW}Тест соединения через Xray → серверы Telegram${CR}"
+    echo -e "  ${CD}────────────────────────────────────────────────${CR}"
+
+    # ── 1. HTTP-проверка api.telegram.org ─────────────────────────
+    echo -ne "  ${CC}●${CR} api.telegram.org ... "
+    local http_code
+    http_code=$(curl -x "socks5h://127.0.0.1:${socks_port}" \
+        -so /dev/null -w "%{http_code}" --max-time 8 "https://api.telegram.org/" 2>/dev/null) || true
+    if [[ "$http_code" =~ ^(200|301|302|403)$ ]]; then
+        echo -e "${CG}OK${CR} (HTTP ${http_code})"
+    else
+        echo -e "${CRED}FAIL${CR} (${http_code:-нет ответа})"
+    fi
+
+    # ── 2. TCP connect-only до IP дата-центров Telegram ───────────
+    local dc_labels=("DC1 (MIA)" "DC2 (AMS)" "DC3 (MIA)" "DC4 (AMS)" "DC5 (SIN)")
+    local dc_ips=("149.154.175.50" "149.154.167.51" "149.154.175.100" "149.154.167.91" "91.108.56.130")
+
+    local ok=0 total=${#dc_ips[@]}
+    echo ""
+    for i in "${!dc_ips[@]}"; do
+        local label="${dc_labels[$i]}" ip="${dc_ips[$i]}"
+        echo -ne "  ${CC}●${CR} ${label} ${CD}(${ip}:443)${CR} ... "
+        local t_start t_end elapsed
+        t_start=$(date +%s%N)
+        if curl -x "socks5h://127.0.0.1:${socks_port}" \
+            --connect-only -s --max-time 5 "http://${ip}:443/" 2>/dev/null; then
+            t_end=$(date +%s%N)
+            elapsed=$(( (t_end - t_start) / 1000000 ))
+            echo -e "${CG}OK${CR} (${elapsed}мс)"
+            ok=$((ok + 1))
+        else
+            echo -e "${CRED}FAIL${CR}"
+        fi
+    done
+
+    echo ""
+    if [[ $ok -eq $total ]]; then
+        echo -e "  ${CG}✔${CR} Все дата-центры доступны через туннель (${ok}/${total})"
+    elif [[ $ok -eq 0 ]]; then
+        echo -e "  ${CRED}✘${CR} Ни один DC не доступен через туннель"
+        echo -e "  ${CD}Проверьте ключ подключения (пункт [3]) и работоспособность upstream-сервера${CR}"
+    else
+        echo -e "  ${CY}⚠${CR} Доступно ${ok} из ${total} DC — возможна частичная блокировка на стороне upstream-сервера"
+    fi
+}
+
 # Проверка/восстановление привязки telemt → Xray upstream.
 # Считается корректной, только если:
 #   1) есть маркированный блок [[upstreams]] от установщика
@@ -667,14 +732,15 @@ _xray_menu() {
         echo -e "    ${CB}[2]${CR} ${CB}Перезапустить туннель${CR}"
         echo -e "    ${CB}[3]${CR} ${CB}Изменить ключ подключения${CR}"
         echo -e "    ${CB}[4]${CR} ${CB}Проверить привязку к telemt${CR}"
-        echo -e "    ${CB}[5]${CR} ${CB}Назад${CR}"
+        echo -e "    ${CB}[5]${CR} ${CB}Тест соединения с серверами Telegram${CR}"
+        echo -e "    ${CB}[6]${CR} ${CB}Назад${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
         local xchoice=""
         while true; do
-            echo -ne "  ${CB}Выбор${CR} [1-5]: "
+            echo -ne "  ${CB}Выбор${CR} [1-6]: "
             read -r xchoice
-            case "$xchoice" in 1|2|3|4|5) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 5" ;; esac
+            case "$xchoice" in 1|2|3|4|5|6) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 6" ;; esac
         done
 
         case "$xchoice" in
@@ -688,7 +754,8 @@ _xray_menu() {
                     echo -e "  ${CRED}✘${CR} Модули установщика не найдены (/opt/telemt-installer)"
                 fi
                 ;;
-            5) return ;;
+            5) _xray_test_telegram ;;
+            6) return ;;
         esac
 
         echo ""
