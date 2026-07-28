@@ -372,20 +372,40 @@ SVCEOF
 }
 
 # ══════════════════════════════════════════════════════════════════
-#  Тест туннеля
+#  Тест туннеля — вызывается автоматически:
+#    1) при первичной установке ключа (xray_upstream_setup)
+#    2) при смене ключа из mytelemtinfo (_xray_change_key)
+#  Проверяет доменные имена Telegram, которые точно матчатся
+#  правилом routing.rules (domain → outboundTag "proxy") из
+#  _xray_generate_config — а не гадает по нестабильным IP дата-центров
+#  (см. историю: прямой TLS-коннект на IP DC даёт ложный FAIL из-за
+#  анти-скан фильтра Telegram на нетипичном ClientHello/SNI).
 # ══════════════════════════════════════════════════════════════════
 _xray_test_tunnel() {
-    msg_step "Тест туннеля"
+    msg_step "Тест туннеля (домены Telegram через SOCKS5)"
 
-    local http_code
-    http_code=$(curl -x socks5h://127.0.0.1:${XRAY_SOCKS_PORT} \
-        -so /dev/null -w "%{http_code}" \
-        --max-time 10 "https://api.telegram.org/" 2>/dev/null) || true
+    local domains=("api.telegram.org" "web.telegram.org" "t.me" "core.telegram.org")
+    local ok=0 total=${#domains[@]}
 
-    if [[ "$http_code" =~ ^(200|301|302|403) ]]; then
-        msg_ok "Туннель работает — api.telegram.org доступен (HTTP ${http_code})"
+    for domain in "${domains[@]}"; do
+        local http_code
+        http_code=$(curl -x "socks5h://127.0.0.1:${XRAY_SOCKS_PORT}" \
+            -so /dev/null -w "%{http_code}" --max-time 8 "https://${domain}/" 2>/dev/null) || true
+        if [[ "$http_code" =~ ^(200|301|302|401|403|404)$ ]]; then
+            msg_ok "${domain} — доступен (HTTP ${http_code})"
+            ok=$((ok + 1))
+        else
+            msg_warn "${domain} — недоступен (${http_code:-нет ответа})"
+        fi
+    done
+
+    if [[ $ok -eq $total ]]; then
+        msg_ok "Туннель работает — вся инфраструктура Telegram доступна (${ok}/${total})"
+    elif [[ $ok -eq 0 ]]; then
+        msg_warn "Туннель не работает — ни один домен Telegram не доступен, проверьте ключ подключения"
+        return 1
     else
-        msg_warn "Тест не прошёл (HTTP ${http_code:-timeout}) — проверьте ключ подключения"
+        msg_warn "Туннель работает частично (${ok}/${total}) — возможна проблема на стороне upstream-сервера"
     fi
 }
 
