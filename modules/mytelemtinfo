@@ -1123,8 +1123,8 @@ main() {
         echo -e "    ${CB}[6]${CR} ${CB}Остановить сервис${CR}"
         echo -e "    ${CB}[7]${CR} ${CB}Xray Upstream Tunnel${CR}"
         echo -e "    ${CB}[8]${CR} ${CB}Обновление telemt (версия / установка)${CR}"
-        echo -e "    ${CB}[9]${CR} ${CB}Пошаговая очистка системы${CR}"
-        echo -e "    ${CB}[10]${CR} ${CB}Обновить mytelemtinfo (self-update)${CR}"
+        echo -e "    ${CB}[9]${CR} ${CB}Обновить mytelemtinfo (self-update)${CR}"
+        echo -e "    ${CB}[10]${CR} ${CB}Пошаговая очистка системы${CR}"
         echo -e "    ${CB}[11]${CR} ${CB}Выход${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
@@ -1177,10 +1177,10 @@ main() {
                 _update_menu
                 ;;
             9)
-                _run_cleaner
+                _self_update
                 ;;
             10)
-                _self_update
+                _run_cleaner
                 ;;
             11)
                 echo -e "  ${CD}До свидания!${CR}"
