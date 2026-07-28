@@ -1022,6 +1022,84 @@ _update_menu() {
 }
 
 # ══════════════════════════════════════════════════════════════════
+#  Self-update mytelemtinfo — обновление самого CLI из репозитория
+#  Клонируем shallow (raw.githubusercontent.com кэширует и игнорирует
+#  cache-busting query-параметры — поэтому только git clone --depth 1)
+# ══════════════════════════════════════════════════════════════════
+MYTELEMTINFO_REPO="https://github.com/vaalaav/telemt-plus-dev.git"
+MYTELEMTINFO_PATH="/usr/local/bin/mytelemtinfo"
+MYTELEMTINFO_BACKUP_DIR="/opt/telemt/backups"
+
+_self_update() {
+    echo -e "  ${CB}${CW}Обновление mytelemtinfo${CR}"
+    echo -e "  ${CD}────────────────────────────────────${CR}"
+
+    if ! command -v git &>/dev/null; then
+        echo -e "  ${CRED}✘${CR} git не установлен (apt install git)"
+        return 1
+    fi
+
+    local self_path="$MYTELEMTINFO_PATH"
+    [[ -f "$self_path" ]] || self_path="$0"
+
+    local tmp; tmp=$(mktemp -d)
+    echo -ne "  ${CC}●${CR} Клонирование репозитория... "
+    if ! git clone --depth 1 -q "$MYTELEMTINFO_REPO" "$tmp" 2>/dev/null; then
+        echo -e "${CRED}FAIL${CR}"
+        echo -e "  ${CRED}✘${CR} Не удалось получить репозиторий (проверьте сеть/доступ)"
+        rm -rf "$tmp"
+        return 1
+    fi
+    echo -e "${CG}OK${CR}"
+
+    local new_file="${tmp}/modules/mytelemtinfo"
+    if [[ ! -f "$new_file" ]]; then
+        echo -e "  ${CRED}✘${CR} Файл modules/mytelemtinfo не найден в репозитории"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    if ! bash -n "$new_file" 2>/dev/null; then
+        echo -e "  ${CRED}✘${CR} Синтаксическая ошибка в скачанном файле — обновление прервано"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    if cmp -s "$new_file" "$self_path" 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} У вас уже установлена последняя версия"
+        rm -rf "$tmp"
+        return 0
+    fi
+
+    echo -e "  ${CY}⚠${CR} Найдена новая версия mytelemtinfo"
+    echo -ne "  ${CB}Обновить сейчас? [Y/n]:${CR} "
+    local a; read -r a
+    if [[ "$a" =~ ^[Nn]$ ]]; then
+        echo -e "  ${CD}Отменено${CR}"
+        rm -rf "$tmp"
+        return 0
+    fi
+
+    mkdir -p "$MYTELEMTINFO_BACKUP_DIR"
+    cp "$self_path" "${MYTELEMTINFO_BACKUP_DIR}/mytelemtinfo.bak.$(date +%s)" 2>/dev/null
+
+    # install → пишет во временный файл и атомарно переименовывает,
+    # поэтому текущий выполняющийся процесс (уже прочитанный inode)
+    # безопасно доработает до конца, а следующий запуск возьмёт новую версию
+    if install -m 0755 "$new_file" "$self_path" 2>/dev/null; then
+        echo -e "  ${CG}✔${CR} mytelemtinfo обновлён (${self_path})"
+        echo -e "  ${CD}Резервная копия: ${MYTELEMTINFO_BACKUP_DIR}/mytelemtinfo.bak.*${CR}"
+        echo -e "  ${CD}Изменения вступят в силу при следующем запуске${CR}"
+    else
+        echo -e "  ${CRED}✘${CR} Не удалось записать файл — проверьте права (запустите от root)"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    rm -rf "$tmp"
+}
+
+# ══════════════════════════════════════════════════════════════════
 #  Главный цикл
 # ══════════════════════════════════════════════════════════════════
 main() {
@@ -1045,14 +1123,15 @@ main() {
         echo -e "    ${CB}[7]${CR} ${CB}Xray Upstream Tunnel${CR}"
         echo -e "    ${CB}[8]${CR} ${CB}Обновление telemt (версия / установка)${CR}"
         echo -e "    ${CB}[9]${CR} ${CB}Пошаговая очистка системы${CR}"
-        echo -e "    ${CB}[10]${CR} ${CB}Выход${CR}"
+        echo -e "    ${CB}[10]${CR} ${CB}Обновить mytelemtinfo (self-update)${CR}"
+        echo -e "    ${CB}[11]${CR} ${CB}Выход${CR}"
         echo -e "  ${CD}────────────────────────────────────${CR}"
 
         local choice=""
         while true; do
-            echo -ne "  ${CB}Выбор${CR} [1-10]: "
+            echo -ne "  ${CB}Выбор${CR} [1-11]: "
             read -r choice
-            case "$choice" in 1|2|3|4|5|6|7|8|9|10) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 10" ;; esac
+            case "$choice" in 1|2|3|4|5|6|7|8|9|10|11) break ;; *) echo -e "  ${CY}⚠${CR} Введите число от 1 до 11" ;; esac
         done
 
         case "$choice" in
@@ -1100,6 +1179,9 @@ main() {
                 _run_cleaner
                 ;;
             10)
+                _self_update
+                ;;
+            11)
                 echo -e "  ${CD}До свидания!${CR}"
                 exit 0
                 ;;
