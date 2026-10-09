@@ -184,14 +184,15 @@ print_menu() {
     echo -e "  ${C_BOLD}${C_WHITE}[ Вариант установки ]${C_RESET}"
     echo -e "    ${C_GREEN}${C_BOLD}[1]${C_RESET} ${C_BOLD}Базовый telemt${C_RESET}"
     echo -e "    ${C_BLUE}${C_BOLD}[2]${C_RESET} ${C_BOLD}Маскировка под веб-сайт (Selfmask)${C_RESET}"
+    echo -e "    ${C_MAGENTA}${C_BOLD}[3]${C_RESET} ${C_BOLD}WEB proxy для Telegram${C_RESET} ${C_DIM}(экспериментально, только Desktop)${C_RESET}"
     echo ""
     echo -e "  ${C_BOLD}${C_WHITE}[ Дополнительные опции ]${C_RESET}"
-    echo -e "    ${C_CYAN}${C_BOLD}[3]${C_RESET} ${C_BOLD}Привязка домена к прокси${C_RESET}"
-    echo -e "    ${C_YELLOW}${C_BOLD}[4]${C_RESET} ${C_BOLD}Применение фиксов оптимизации MEKO${C_RESET}"
-    echo -e "    ${C_WHITE}${C_BOLD}[5]${C_RESET} ${C_BOLD}Xray Upstream Tunnel${C_RESET}"
+    echo -e "    ${C_CYAN}${C_BOLD}[4]${C_RESET} ${C_BOLD}Привязка домена к прокси${C_RESET}"
+    echo -e "    ${C_YELLOW}${C_BOLD}[5]${C_RESET} ${C_BOLD}Применение фиксов оптимизации MEKO${C_RESET}"
+    echo -e "    ${C_WHITE}${C_BOLD}[6]${C_RESET} ${C_BOLD}Xray Upstream Tunnel${C_RESET}"
     echo ""
     echo -e "  ${C_BOLD}${C_WHITE}[ Система ]${C_RESET}"
-    echo -e "    ${C_RED}${C_BOLD}[6]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
+    echo -e "    ${C_RED}${C_BOLD}[7]${C_RESET} ${C_BOLD}Полная или пошаговая очистка системы${C_RESET}"
     echo -e "    ${C_DIM}[0]${C_RESET} ${C_BOLD}Выход${C_RESET}"
     echo ""
     echo -e "  ${C_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
@@ -238,6 +239,15 @@ do_selfmask_install() {
     sitemask_setup_renewal || true
     sitemask_verify || true
     msg_ok "Selfmask настроен"
+}
+
+do_webproxy_install() {
+    _load_module "telemt_core" || return 1
+    _load_module "web_proxy"   || return 1
+    init_logging
+    rollback_clear
+
+    webproxy_setup || { msg_err "Ошибка установки WEB proxy"; return 1; }
 }
 
 do_meko_fixes() {
@@ -289,17 +299,18 @@ main() {
         print_status_panel
         print_menu
 
-        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-6]: "
+        echo -ne "  ${C_BOLD}Выберите действие${C_RESET} [0-7]: "
         local choice=""
         read -r choice </dev/tty || true
 
         case "$choice" in
             1) do_telemt_install   ;;
             2) do_selfmask_install ;;
-            3) do_bind_domain      ;;
-            4) do_meko_fixes       ;;
-            5) do_xray_upstream    ;;
-            6) do_cleanup          ;;
+            3) do_webproxy_install ;;
+            4) do_bind_domain      ;;
+            5) do_meko_fixes       ;;
+            6) do_xray_upstream    ;;
+            7) do_cleanup          ;;
             0)
                 echo ""
                 msg_info "До свидания!"
